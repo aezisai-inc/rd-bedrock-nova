@@ -1,0 +1,98 @@
+# Docker Compose for Local Development
+version: '3.8'
+
+services:
+  # Agent Core Service (Coordinator)
+  agent-core:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.agent-core
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - AUDIO_SERVICE_URL=http://audio-service:8000
+      - VIDEO_SERVICE_URL=http://video-service:8000
+      - SEARCH_SERVICE_URL=http://search-service:8000
+      - AWS_REGION=ap-northeast-1
+    depends_on:
+      - redis
+      - audio-service
+      - video-service
+      - search-service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Audio Service (Nova Sonic)
+  audio-service:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.audio-service
+    ports:
+      - "8001:8000"
+    environment:
+      - AWS_REGION=ap-northeast-1
+      - CONTENT_BUCKET=nova-content-local
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Video Service (Nova Omni)
+  video-service:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.video-service
+    ports:
+      - "8002:8000"
+    environment:
+      - AWS_REGION=ap-northeast-1
+      - CONTENT_BUCKET=nova-content-local
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Search Service (Nova Embeddings)
+  search-service:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.search-service
+    ports:
+      - "8003:8000"
+    environment:
+      - AWS_REGION=ap-northeast-1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis (Agent Core Memory)
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # LocalStack (AWS Services Mock)
+  localstack:
+    image: localstack/localstack:latest
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3,dynamodb,events
+      - DEFAULT_REGION=ap-northeast-1
+    volumes:
+      - ./localstack:/docker-entrypoint-initaws.d
+
