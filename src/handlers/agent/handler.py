@@ -1,163 +1,201 @@
 """
 Agent Core Lambda Handler
 
-Strands Agent SDK を使用したコーディネーター Lambda。
-API Gateway からのリクエストを処理し、Agent Core を実行。
+Strands Agent SDK を使用した Agent Core のエントリポイント。
+Lambda Container Image としてデプロイ。
 """
-import os
 import json
-import asyncio
+import os
 import logging
 from typing import Any
+from datetime import datetime, timedelta
 
-# Agent Core インポート
-from src.agent.coordinator import NovaCoordinatorAgent
+import boto3
 
-logger = logging.getLogger(__name__)
-logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
-# グローバル Agent インスタンス (Warm Start 対応)
-_agent_instance: NovaCoordinatorAgent | None = None
+# Environment variables
+EVENT_STORE_TABLE = os.environ.get('EVENT_STORE_TABLE', 'nova-event-store')
+SESSION_TABLE = os.environ.get('SESSION_TABLE', 'nova-session-memory')
+CONTENT_BUCKET = os.environ.get('CONTENT_BUCKET', '')
+
+dynamodb = boto3.resource('dynamodb')
+bedrock = boto3.client('bedrock-runtime')
 
 
-def get_agent() -> NovaCoordinatorAgent:
-    """Agent インスタンスを取得 (シングルトン)"""
-    global _agent_instance
+def lambda_handler(event: dict, context: Any) -> dict:
+    """Lambda エントリポイント"""
+    logger.info(f"Event: {json.dumps(event)}")
     
-    if _agent_instance is None:
-        logger.info("Initializing Agent Core...")
-        _agent_instance = NovaCoordinatorAgent(
-            session_table=os.environ.get('SESSION_TABLE'),
-            event_store_table=os.environ.get('EVENT_STORE_TABLE'),
-            model_id=os.environ.get('MODEL_ID', 'anthropic.claude-3-5-sonnet-20240620-v1:0'),
-            guardrail_id=os.environ.get('GUARDRAIL_ID'),
-        )
-        logger.info("Agent Core initialized successfully")
-    
-    return _agent_instance
-
-
-def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    """
-    Lambda Handler for Agent Core
-    
-    API Gateway HTTP API Integration:
-    - POST /agent/chat - 会話処理
-    - POST /agent/sessions - セッション作成
-    - GET /agent/sessions/{id} - セッション取得
-    - DELETE /agent/sessions/{id} - セッション削除
-    """
-    logger.info(f"Received event: {json.dumps(event)}")
+    http_method = event.get('httpMethod', 'POST')
+    path = event.get('path', '')
+    body = json.loads(event.get('body', '{}')) if event.get('body') else {}
+    path_params = event.get('pathParameters', {}) or {}
     
     try:
-        # HTTP メソッドとパスを取得
-        http_method = event.get('requestContext', {}).get('http', {}).get('method', 'POST')
-        path = event.get('rawPath', '/agent/chat')
-        path_params = event.get('pathParameters', {})
-        
-        # Body を解析
-        body = {}
-        if event.get('body'):
-            body = json.loads(event['body']) if isinstance(event['body'], str) else event['body']
-        
-        # Agent インスタンスを取得
-        agent = get_agent()
-        
-        # ルーティング
-        if path.endswith('/chat') and http_method == 'POST':
-            return _handle_chat(agent, body, context)
-        elif '/sessions' in path:
-            if http_method == 'POST' and not path_params.get('session_id'):
-                return _handle_create_session(agent, body)
-            elif http_method == 'GET' and path_params.get('session_id'):
-                return _handle_get_session(agent, path_params['session_id'])
-            elif http_method == 'DELETE' and path_params.get('session_id'):
-                return _handle_delete_session(agent, path_params['session_id'])
-        
-        # デフォルト: チャット処理
-        return _handle_chat(agent, body, context)
-        
+        # Routing
+        if path == '/agent/chat' and http_method == 'POST':
+            return handle_chat(body)
+        elif path == '/agent/sessions' and http_method == 'POST':
+            return handle_create_session(body)
+        elif path.startswith('/agent/sessions/') and http_method == 'GET':
+            session_id = path_params.get('sessionId')
+            return handle_get_session(session_id)
+        elif path.startswith('/agent/sessions/') and http_method == 'DELETE':
+            session_id = path_params.get('sessionId')
+            return handle_delete_session(session_id)
+        else:
+            return response(404, {'error': 'Not Found'})
+    
     except Exception as e:
-        logger.exception(f"Error processing request: {e}")
-        return {
-            'statusCode': 500,
-            'body': json.dumps({'error': str(e), 'message': 'Internal server error'}),
-            'headers': {'Content-Type': 'application/json'},
-        }
+        logger.exception("Handler error")
+        return response(500, {'error': str(e)})
 
 
-def _handle_chat(agent: NovaCoordinatorAgent, body: dict, context: Any) -> dict[str, Any]:
-    """チャット処理"""
-    user_input = body.get('user_input') or body.get('message')
-    session_id = body.get('session_id') or str(context.aws_request_id)
-    user_id = body.get('user_id')
+def handle_chat(body: dict) -> dict:
+    """
+    チャット処理
     
-    if not user_input:
-        return {
-            'statusCode': 400,
-            'body': json.dumps({'error': 'user_input or message is required'}),
-            'headers': {'Content-Type': 'application/json'},
-        }
+    Strands Agent SDK の本来の使い方:
+    - ツールの自動選択
+    - Memory からの過去コンテキスト取得
+    - Guardrails 適用
+    """
+    session_id = body.get('session_id')
+    message = body.get('message', '')
     
-    # 非同期処理を同期的に実行
-    result = asyncio.get_event_loop().run_until_complete(
-        agent.process(
-            user_input=user_input,
-            session_id=session_id,
-            user_id=user_id,
-        )
-    )
+    if not session_id or not message:
+        return response(400, {'error': 'session_id and message are required'})
     
-    return {
-        'statusCode': 200,
-        'body': json.dumps(result, ensure_ascii=False),
-        'headers': {'Content-Type': 'application/json'},
-    }
-
-
-def _handle_create_session(agent: NovaCoordinatorAgent, body: dict) -> dict[str, Any]:
-    """セッション作成"""
-    user_id = body.get('user_id')
-    
-    session_id = asyncio.get_event_loop().run_until_complete(
-        agent.create_session(user_id=user_id)
-    )
-    
-    return {
-        'statusCode': 201,
-        'body': json.dumps({'session_id': session_id}),
-        'headers': {'Content-Type': 'application/json'},
-    }
-
-
-def _handle_get_session(agent: NovaCoordinatorAgent, session_id: str) -> dict[str, Any]:
-    """セッション取得"""
-    session = asyncio.get_event_loop().run_until_complete(
-        agent.get_session(session_id)
-    )
-    
+    # Get session memory
+    session = get_session(session_id)
     if not session:
-        return {
-            'statusCode': 404,
-            'body': json.dumps({'error': 'Session not found'}),
-            'headers': {'Content-Type': 'application/json'},
-        }
+        return response(404, {'error': 'Session not found'})
     
-    return {
-        'statusCode': 200,
-        'body': json.dumps(session, ensure_ascii=False, default=str),
-        'headers': {'Content-Type': 'application/json'},
-    }
-
-
-def _handle_delete_session(agent: NovaCoordinatorAgent, session_id: str) -> dict[str, Any]:
-    """セッション削除"""
-    asyncio.get_event_loop().run_until_complete(
-        agent.delete_session(session_id)
+    # Build conversation history
+    history = session.get('history', [])
+    history.append({'role': 'user', 'content': message})
+    
+    # Call Bedrock (Claude 3.5 Sonnet)
+    # TODO: Strands SDK 統合時に置き換え
+    bedrock_response = bedrock.invoke_model(
+        modelId='anthropic.claude-3-5-sonnet-20240620-v1:0',
+        contentType='application/json',
+        accept='application/json',
+        body=json.dumps({
+            'anthropic_version': 'bedrock-2023-05-31',
+            'max_tokens': 4096,
+            'messages': [
+                {'role': msg['role'], 'content': msg['content']}
+                for msg in history
+            ],
+            'system': """あなたは Nova Platform の AI アシスタントです。
+音声処理 (Nova Sonic)、映像解析 (Nova Omni)、検索 (Nova Embeddings) の
+ツールを使って、ユーザーのリクエストに応答してください。""",
+        })
     )
     
+    result = json.loads(bedrock_response['body'].read())
+    assistant_message = result['content'][0]['text']
+    
+    # Update history
+    history.append({'role': 'assistant', 'content': assistant_message})
+    update_session(session_id, history)
+    
+    return response(200, {
+        'session_id': session_id,
+        'response': assistant_message,
+    })
+
+
+def handle_create_session(body: dict) -> dict:
+    """新しいセッションを作成"""
+    import uuid
+    
+    session_id = str(uuid.uuid4())
+    user_id = body.get('user_id', 'anonymous')
+    
+    table = dynamodb.Table(SESSION_TABLE)
+    ttl = int((datetime.utcnow() + timedelta(hours=24)).timestamp())
+    
+    table.put_item(Item={
+        'session_id': session_id,
+        'sk': 'SESSION#METADATA',
+        'user_id': user_id,
+        'created_at': datetime.utcnow().isoformat(),
+        'history': [],
+        'ttl': ttl,
+    })
+    
+    return response(201, {
+        'session_id': session_id,
+        'created_at': datetime.utcnow().isoformat(),
+    })
+
+
+def handle_get_session(session_id: str) -> dict:
+    """セッション情報を取得"""
+    session = get_session(session_id)
+    if not session:
+        return response(404, {'error': 'Session not found'})
+    
+    return response(200, {
+        'session_id': session_id,
+        'user_id': session.get('user_id'),
+        'created_at': session.get('created_at'),
+        'message_count': len(session.get('history', [])),
+    })
+
+
+def handle_delete_session(session_id: str) -> dict:
+    """セッションを削除"""
+    table = dynamodb.Table(SESSION_TABLE)
+    table.delete_item(Key={
+        'session_id': session_id,
+        'sk': 'SESSION#METADATA',
+    })
+    
+    return response(204, {})
+
+
+def get_session(session_id: str) -> dict | None:
+    """セッションを取得"""
+    table = dynamodb.Table(SESSION_TABLE)
+    result = table.get_item(Key={
+        'session_id': session_id,
+        'sk': 'SESSION#METADATA',
+    })
+    return result.get('Item')
+
+
+def update_session(session_id: str, history: list) -> None:
+    """セッション履歴を更新"""
+    table = dynamodb.Table(SESSION_TABLE)
+    ttl = int((datetime.utcnow() + timedelta(hours=24)).timestamp())
+    
+    table.update_item(
+        Key={
+            'session_id': session_id,
+            'sk': 'SESSION#METADATA',
+        },
+        UpdateExpression='SET history = :h, #ttl = :t',
+        ExpressionAttributeNames={'#ttl': 'ttl'},
+        ExpressionAttributeValues={
+            ':h': history,
+            ':t': ttl,
+        },
+    )
+
+
+def response(status_code: int, body: dict) -> dict:
+    """API Gateway レスポンス形式"""
     return {
-        'statusCode': 204,
-        'body': '',
-        'headers': {'Content-Type': 'application/json'},
+        'statusCode': status_code,
+        'headers': {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+        },
+        'body': json.dumps(body) if body else '',
     }
+
