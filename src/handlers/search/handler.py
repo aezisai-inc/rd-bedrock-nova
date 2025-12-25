@@ -9,11 +9,17 @@ Nova Embeddings + S3 Vectors を使用:
 import json
 import os
 import logging
+import asyncio
 from typing import Any
 
 import boto3
 
-from src.agent.tools.search import search_knowledge, generate_embeddings
+from src.agent.tools.search import (
+    search_knowledge,
+    generate_embeddings,
+    generate_batch_embeddings,
+    compute_similarity,
+)
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -40,6 +46,10 @@ def lambda_handler(event: dict, context: Any) -> dict:
             return handle_search(body)
         elif path == '/search/embeddings' and http_method == 'POST':
             return handle_embeddings(body)
+        elif path == '/search/embeddings/batch' and http_method == 'POST':
+            return handle_batch_embeddings(body)
+        elif path == '/search/similarity' and http_method == 'POST':
+            return handle_similarity(body)
         elif path == '/search/index' and http_method == 'POST':
             return handle_index_document(body)
         else:
@@ -60,49 +70,114 @@ def handle_search(body: dict) -> dict:
     if not query and not query_image_url:
         return response(400, {'error': 'Either query or query_image_url is required'})
     
-    import asyncio
-    result = asyncio.get_event_loop().run_until_complete(
-        search_knowledge(
-            query=query,
-            query_image_url=query_image_url,
-            top_k=top_k,
-            filters=filters,
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        result = loop.run_until_complete(
+            search_knowledge(
+                query=query,
+                query_image_url=query_image_url,
+                top_k=top_k,
+                filters=filters,
+            )
         )
-    )
+    finally:
+        loop.close()
     
     # Event Store に保存
-    store_event('SearchPerformed', {
-        'query': query,
-        'query_image_url': query_image_url,
-        'top_k': top_k,
-        'result_count': result.total_count,
-    })
+    if 'error' not in result:
+        store_event('SearchPerformed', {
+            'query': query,
+            'query_image_url': query_image_url,
+            'top_k': top_k,
+            'result_count': result.get('total_count', 0),
+            'embedding_modality': result.get('embedding_modality'),
+        })
     
-    return response(200, {
-        'query_id': result.query_id,
-        'total_count': result.total_count,
-        'documents': result.documents,
-    })
+    return response(200, result)
 
 
 def handle_embeddings(body: dict) -> dict:
     """埋め込みベクトル生成"""
     text = body.get('text')
     image_url = body.get('image_url')
+    dimension = body.get('dimension', 1024)
     
     if not text and not image_url:
         return response(400, {'error': 'Either text or image_url is required'})
     
-    import asyncio
-    result = asyncio.get_event_loop().run_until_complete(
-        generate_embeddings(text=text, image_url=image_url)
-    )
+    if dimension not in [256, 384, 1024]:
+        return response(400, {'error': 'dimension must be 256, 384, or 1024'})
     
-    return response(200, {
-        'embedding': result.embedding,
-        'dimension': result.dimension,
-        'modality': result.modality,
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        result = loop.run_until_complete(
+            generate_embeddings(text=text, image_url=image_url, dimension=dimension)
+        )
+    finally:
+        loop.close()
+    
+    return response(200, result)
+
+
+def handle_batch_embeddings(body: dict) -> dict:
+    """バッチ埋め込み生成"""
+    texts = body.get('texts')
+    dimension = body.get('dimension', 1024)
+    
+    if not texts or not isinstance(texts, list):
+        return response(400, {'error': 'texts (array) is required'})
+    
+    if len(texts) > 32:
+        return response(400, {'error': 'Maximum 32 texts allowed'})
+    
+    if dimension not in [256, 384, 1024]:
+        return response(400, {'error': 'dimension must be 256, 384, or 1024'})
+    
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        result = loop.run_until_complete(
+            generate_batch_embeddings(texts=texts, dimension=dimension)
+        )
+    finally:
+        loop.close()
+    
+    # Event Store に保存
+    store_event('BatchEmbeddingsGenerated', {
+        'batch_size': len(texts),
+        'dimension': dimension,
+        'success_count': result.get('success_count', 0),
     })
+    
+    return response(200, result)
+
+
+def handle_similarity(body: dict) -> dict:
+    """類似度計算"""
+    embedding1 = body.get('embedding1')
+    embedding2 = body.get('embedding2')
+    
+    if not embedding1 or not embedding2:
+        return response(400, {'error': 'embedding1 and embedding2 are required'})
+    
+    if not isinstance(embedding1, list) or not isinstance(embedding2, list):
+        return response(400, {'error': 'embeddings must be arrays'})
+    
+    if len(embedding1) != len(embedding2):
+        return response(400, {'error': 'embeddings must have the same dimension'})
+    
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        result = loop.run_until_complete(
+            compute_similarity(embedding1=embedding1, embedding2=embedding2)
+        )
+    finally:
+        loop.close()
+    
+    return response(200, result)
 
 
 def handle_index_document(body: dict) -> dict:
@@ -111,6 +186,7 @@ def handle_index_document(body: dict) -> dict:
     text = body.get('text')
     image_url = body.get('image_url')
     metadata = body.get('metadata', {})
+    dimension = body.get('dimension', 1024)
     
     if not document_id:
         return response(400, {'error': 'document_id is required'})
@@ -119,32 +195,36 @@ def handle_index_document(body: dict) -> dict:
         return response(400, {'error': 'Either text or image_url is required'})
     
     # 埋め込みベクトルを生成
-    import asyncio
-    embedding_result = asyncio.get_event_loop().run_until_complete(
-        generate_embeddings(text=text, image_url=image_url)
-    )
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        embedding_result = loop.run_until_complete(
+            generate_embeddings(text=text, image_url=image_url, dimension=dimension)
+        )
+    finally:
+        loop.close()
     
     # S3 Vectors にインデックス (GA後に実装)
     # 現在はメタデータを DynamoDB に保存
     store_document_metadata(document_id, {
         'text': text,
         'image_url': image_url,
-        'embedding_dimension': embedding_result.dimension,
-        'modality': embedding_result.modality,
+        'embedding_dimension': embedding_result.get('dimension'),
+        'modality': embedding_result.get('modality'),
         **metadata,
     })
     
     store_event('DocumentIndexed', {
         'document_id': document_id,
-        'modality': embedding_result.modality,
-        'dimension': embedding_result.dimension,
+        'modality': embedding_result.get('modality'),
+        'dimension': embedding_result.get('dimension'),
     })
     
     return response(201, {
         'document_id': document_id,
         'indexed': True,
-        'dimension': embedding_result.dimension,
-        'modality': embedding_result.modality,
+        'dimension': embedding_result.get('dimension'),
+        'modality': embedding_result.get('modality'),
     })
 
 
