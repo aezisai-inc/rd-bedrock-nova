@@ -9,4 +9,8 @@ T007,Nova Embeddings統合,マルチモーダル埋め込み生成のNova Embedd
 T008,S3 Vectors統合,S3 Vectors (Preview) APIによるベクトル検索実装,completed,high,implementation,AI Assistant,2025-12-25,2025-12-26,T007,README.md,S3VectorsGateway + search tools/handler実装
 T009,パフォーマンス計測,コールドスタート・レイテンシ・スループット測定,completed,low,testing,AI Assistant,2025-12-25,2025-12-26,T008,performance-baseline.md,ベンチマークツール + ベースラインドキュメント作成
 T010,コスト分析,Lambda/DynamoDB/S3実運用コスト分析・ECS比較レポート,completed,low,documentation,AI Assistant,2025-12-25,2025-12-26,T009,cost-analysis.md,コスト計算ツール + 比較レポート作成
+T011,AG-UI Protocol Backend,AgentCore RuntimeでのAG-UIプロトコル対応エンドポイント実装,completed,high,implementation,AI Assistant,2025-12-26,2025-12-26,T010,AGENTCORE_COPILOTKIT_ARCHITECTURE.md,SSE形式のイベントストリーミング
+T012,Frontend CopilotKit統合,Next.js + CopilotKit UIコンポーネント統合,completed,high,implementation,AI Assistant,2025-12-26,2025-12-26,T011,AGENTCORE_COPILOTKIT_ARCHITECTURE.md,/copilotルート新規作成
+T013,認証・環境設定,Cognito JWT認証 + 環境変数設定 + CORS設定,completed,medium,implementation,AI Assistant,2025-12-26,2025-12-26,T012,README.md,Static Export対応
+T014,E2E動作確認,AG-UI + CopilotKit + AgentCore完全統合テスト,completed,high,testing,AI Assistant,2025-12-26,2025-12-26,T013,,UIからAIエージェント動作確認
 
