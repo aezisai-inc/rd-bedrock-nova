@@ -50,10 +50,10 @@
 │  │  ┌────────────────────────────────────────────────────┐              │    │
 │  │  │ Data Tier (Isolated Subnets)                       │              │    │
 │  │  │                                                    │              │    │
-│  │  │  ┌─────────┐  ┌─────────┐  ┌─────────┐           │              │    │
-│  │  │  │ DynamoDB│  │ ElastiCache│ │OpenSearch│          │              │    │
-│  │  │  │ (VPC EP)│  │ (Redis)  │  │Serverless│          │              │    │
-│  │  │  └─────────┘  └─────────┘  └─────────┘           │              │    │
+│  │  │  ┌─────────┐  ┌─────────┐                        │              │    │
+│  │  │  │ DynamoDB│  │ ElastiCache│                      │              │    │
+│  │  │  │ (VPC EP)│  │ (Redis)  │                        │              │    │
+│  │  │  └─────────┘  └─────────┘                        │              │    │
 │  │  └────────────────────────────────────────────────────┘              │    │
 │  │                                                                      │    │
 │  └──────────────────────────────────────────────────────────────────────┘    │
@@ -128,7 +128,6 @@ export class NovaPlatformStack extends cdk.Stack {
     const computeStack = new ComputeStack(this, 'Compute', {
       vpc: networkStack.vpc,
       eventStore: dataStack.eventStoreTable,
-      searchCollection: dataStack.searchCollection,
       contentBucket: dataStack.contentBucket,
       redisCluster: dataStack.redisCluster,
     });
@@ -211,14 +210,13 @@ export class NetworkStack extends cdk.NestedStack {
 ```typescript
 // infra/lib/stacks/data-stack.ts
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
-import * as opensearch from 'aws-cdk-lib/aws-opensearchserverless';
 import * as elasticache from 'aws-cdk-lib/aws-elasticache';
 import * as s3 from 'aws-cdk-lib/aws-s3';
+// Note: OpenSearch Serverless 廃止 - 代替としてDynamoDB+Bedrockナレッジベース検討中
 
 export class DataStack extends cdk.NestedStack {
   public readonly eventStoreTable: dynamodb.Table;
   public readonly readModelTable: dynamodb.Table;
-  public readonly searchCollection: opensearch.CfnCollection;
   public readonly contentBucket: s3.Bucket;
   public readonly redisCluster: elasticache.CfnReplicationGroup;
 
@@ -250,21 +248,11 @@ export class DataStack extends cdk.NestedStack {
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
     });
 
-    // OpenSearch Serverless Collection (Vector Search)
-    const securityPolicy = new opensearch.CfnSecurityPolicy(this, 'SecurityPolicy', {
-      name: 'nova-security-policy',
-      type: 'encryption',
-      policy: JSON.stringify({
-        Rules: [{ ResourceType: 'collection', Resource: ['collection/nova-search'] }],
-        AWSOwnedKey: true,
-      }),
-    });
-
-    this.searchCollection = new opensearch.CfnCollection(this, 'SearchCollection', {
-      name: 'nova-search',
-      type: 'VECTORSEARCH',
-    });
-    this.searchCollection.addDependency(securityPolicy);
+    // Note: OpenSearch Serverless 廃止
+    // ベクトル検索は以下の代替案を検討:
+    // - Bedrock Knowledge Bases (マネージド)
+    // - PostgreSQL + pgvector (RDS)
+    // - DynamoDB + アプリレベルでの類似検索
 
     // S3 Bucket for content
     this.contentBucket = new s3.Bucket(this, 'ContentBucket', {
@@ -472,6 +460,7 @@ export class ComputeStack extends cdk.NestedStack {
 
     // =================================================================
     // Search Service (Nova Embeddings)
+    // Note: OpenSearch Serverless 廃止 - DynamoDB + Bedrock で代替検討
     // =================================================================
     const searchService = new ecsPatterns.ApplicationLoadBalancedFargateService(
       this, 'SearchService', {
@@ -481,9 +470,9 @@ export class ComputeStack extends cdk.NestedStack {
           image: ecs.ContainerImage.fromEcrRepository(searchServiceRepo, 'latest'),
           containerPort: 8000,
           environment: {
-            SEARCH_COLLECTION_ENDPOINT: props.searchCollection.attrCollectionEndpoint,
             CONTENT_BUCKET: props.contentBucket.bucketName,
             NOVA_EMBEDDINGS_MODEL_ID: 'amazon.nova-multimodal-embeddings-v1',
+            // TODO: 代替ベクトルストア設定
           },
         },
         desiredCount: 2,
@@ -500,12 +489,6 @@ export class ComputeStack extends cdk.NestedStack {
       new iam.PolicyStatement({
         actions: ['bedrock:InvokeModel'],
         resources: ['arn:aws:bedrock:*:*:model/amazon.nova-multimodal-embeddings-*'],
-      })
-    );
-    searchService.taskDefinition.taskRole.addToPrincipalPolicy(
-      new iam.PolicyStatement({
-        actions: ['aoss:APIAccessAll'],
-        resources: ['*'],
       })
     );
     props.contentBucket.grantRead(searchService.taskDefinition.taskRole);

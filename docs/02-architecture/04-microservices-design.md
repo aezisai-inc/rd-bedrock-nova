@@ -534,7 +534,7 @@ container:
 responsibilities:
   - マルチモーダルコンテンツ検索
   - Nova Embeddings によるベクトル化
-  - OpenSearch Serverless へのインデックス・検索
+  - DynamoDB でのベクトル管理（代替検討中）
 
 apis:
   - POST /search             # 検索 (Agent Core から呼び出し)
@@ -545,23 +545,23 @@ events_consumed:
   - VideoAnalyzed            # インデックス対象
 
 backing_services:
-  - OpenSearch Serverless (vector search)
+  - DynamoDB (ベクトルストレージ - 将来: Bedrock KB or pgvector)
   - Bedrock (Nova Embeddings)
   - S3 (images)
 ```
 
 ```python
 # src/services/search/main.py
+# Note: OpenSearch Serverless 廃止 - DynamoDB + Bedrock で代替検討中
 from fastapi import FastAPI
 from pydantic import BaseModel
 import boto3
 import json
-from opensearchpy import OpenSearch
 
 app = FastAPI(title="Nova Search Service")
 
 bedrock = boto3.client('bedrock-runtime')
-opensearch = OpenSearch(hosts=[os.environ['SEARCH_ENDPOINT']])
+dynamodb = boto3.client('dynamodb')
 
 
 class SearchRequest(BaseModel):
@@ -578,8 +578,14 @@ class SearchResponse(BaseModel):
 @app.post("/search", response_model=SearchResponse)
 async def search(request: SearchRequest):
     """
-    Nova Embeddings + OpenSearch でマルチモーダル検索。
+    Nova Embeddings でベクトル検索。
     Agent Core Service から呼び出される。
+    
+    Note: OpenSearch Serverless 廃止
+    代替案として以下を検討中:
+    - Bedrock Knowledge Bases
+    - PostgreSQL + pgvector
+    - DynamoDB + アプリレベル類似検索
     """
     # ベクトル化
     embedding_input = {}
@@ -596,31 +602,9 @@ async def search(request: SearchRequest):
     
     embedding = json.loads(response['body'].read())['embedding']
     
-    # OpenSearch で kNN 検索
-    search_response = opensearch.search(
-        index='nova-vectors',
-        body={
-            'size': request.limit,
-            'query': {
-                'knn': {
-                    'embedding': {
-                        'vector': embedding,
-                        'k': request.limit,
-                    }
-                }
-            }
-        }
-    )
-    
-    results = [
-        {
-            'id': hit['_id'],
-            'score': hit['_score'],
-            'content': hit['_source'].get('content'),
-            'source_type': hit['_source'].get('source_type'),
-        }
-        for hit in search_response['hits']['hits']
-    ]
+    # TODO: 代替ベクトル検索実装
+    # 現在は DynamoDB から直接検索（類似度計算はアプリレベル）
+    results = []
     
     return SearchResponse(results=results, count=len(results))
 ```
@@ -684,7 +668,7 @@ async def call_service(service_name: str, endpoint: str, payload: dict):
 │  1. Codebase: 単一リポジトリ、サービスごとに Dockerfile                    │
 │  2. Dependencies: requirements.txt / pyproject.toml                      │
 │  3. Config: 環境変数 (ECS Task Definition)                              │
-│  4. Backing Services: S3, DynamoDB, OpenSearch, Redis をリソースとして    │
+│  4. Backing Services: S3, DynamoDB, Redis をリソースとして              │
 │  5. Build/Release/Run: ECR Push → ECS Deploy                            │
 │  6. Processes: ステートレスコンテナ、状態は Redis/DynamoDB               │
 │  7. Port Binding: FastAPI が 8000 ポートで公開                           │
@@ -760,10 +744,10 @@ CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 │  │  ┌─────────────────────────────────────────────────────────────┐   │    │
 │  │  │ Isolated Subnets (Data)                                      │   │    │
 │  │  │                                                              │   │    │
-│  │  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │   │    │
-│  │  │  │ ElastiCache │  │ DynamoDB    │  │ OpenSearch  │         │   │    │
-│  │  │  │ (Redis)     │  │ (VPC EP)    │  │ Serverless  │         │   │    │
-│  │  │  └─────────────┘  └─────────────┘  └─────────────┘         │   │    │
+│  │  │  ┌─────────────┐  ┌─────────────┐                         │   │    │
+│  │  │  │ ElastiCache │  │ DynamoDB    │                         │   │    │
+│  │  │  │ (Redis)     │  │ (VPC EP)    │                         │   │    │
+│  │  │  └─────────────┘  └─────────────┘                         │   │    │
 │  │  └─────────────────────────────────────────────────────────────┘   │    │
 │  │                                                                      │    │
 │  └─────────────────────────────────────────────────────────────────────┘    │

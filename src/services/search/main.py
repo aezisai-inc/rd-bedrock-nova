@@ -3,22 +3,44 @@ Search Service - Nova Multimodal Embeddings を使用したベクトル検索サ
 
 Nova Multimodal Embeddings の機能:
 - テキスト/画像/音声のマルチモーダル埋め込み生成
-- OpenSearch Serverless との統合
+- DynamoDB でのベクトル管理 (OpenSearch Serverless 廃止)
 - セマンティック検索
+
+Note: OpenSearch Serverless 廃止
+代替案として以下を検討中:
+- Bedrock Knowledge Bases (マネージド)
+- PostgreSQL + pgvector
+- DynamoDB + アプリレベル類似検索
 """
-from fastapi import FastAPI, HTTPException, UploadFile, File, status
+from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 import logging
 import uuid
+import os
+import json
+import boto3
 
 logger = logging.getLogger(__name__)
+
+# Environment
+CONTENT_BUCKET = os.environ.get('CONTENT_BUCKET', 'nova-content-bucket')
+EVENT_STORE_TABLE = os.environ.get('EVENT_STORE_TABLE', 'nova-event-store')
+READ_MODEL_TABLE = os.environ.get('READ_MODEL_TABLE', 'nova-read-model')
+NOVA_EMBEDDINGS_MODEL_ID = os.environ.get('NOVA_EMBEDDINGS_MODEL_ID', 'amazon.nova-multimodal-embeddings-v1')
+AWS_REGION = os.environ.get('AWS_REGION', 'ap-northeast-1')
+
+# Clients
+bedrock_client = boto3.client('bedrock-runtime', region_name=AWS_REGION)
+dynamodb_client = boto3.client('dynamodb', region_name=AWS_REGION)
+s3_client = boto3.client('s3', region_name=AWS_REGION)
+
 
 app = FastAPI(
     title="Nova Search Service",
     version="0.1.0",
-    description="ベクトル検索サービス - Bedrock Nova Multimodal Embeddings を使用",
+    description="ベクトル検索サービス - Bedrock Nova Multimodal Embeddings (OpenSearch廃止)",
 )
 
 
@@ -79,13 +101,48 @@ class EmbeddingResponse(BaseModel):
     model_id: str
 
 
+# === Helper Functions ===
+async def generate_embedding_vector(text: Optional[str] = None, image_base64: Optional[str] = None) -> List[float]:
+    """Nova Embeddings でベクトル生成"""
+    embedding_input = {}
+    if text:
+        embedding_input['inputText'] = text
+    if image_base64:
+        embedding_input['inputImage'] = image_base64
+
+    response = bedrock_client.invoke_model(
+        modelId=NOVA_EMBEDDINGS_MODEL_ID,
+        body=json.dumps(embedding_input),
+    )
+
+    result = json.loads(response['body'].read())
+    return result.get('embedding', [])
+
+
+def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
+    """コサイン類似度を計算"""
+    if len(vec1) != len(vec2):
+        return 0.0
+
+    dot_product = sum(a * b for a, b in zip(vec1, vec2))
+    magnitude1 = sum(a * a for a in vec1) ** 0.5
+    magnitude2 = sum(b * b for b in vec2) ** 0.5
+
+    if magnitude1 == 0 or magnitude2 == 0:
+        return 0.0
+
+    return dot_product / (magnitude1 * magnitude2)
+
+
 # === Endpoints ===
 @app.post("/search", response_model=SearchResponse)
 async def semantic_search(query: SearchQuery):
     """
     Nova Multimodal Embeddings を使用したセマンティック検索を実行します。
     
-    テキスト、画像、または両方を組み合わせたクエリをサポートします。
+    Note: OpenSearch Serverless 廃止
+    DynamoDB から全ドキュメントを取得し、アプリレベルで類似度計算を行う簡易実装。
+    大規模データには Bedrock Knowledge Bases または pgvector を推奨。
     """
     query_id = str(uuid.uuid4())
     start_time = datetime.utcnow()
@@ -98,38 +155,58 @@ async def semantic_search(query: SearchQuery):
 
     logger.info(f"Search query received. Query ID: {query_id}")
 
-    # 実際の実装では:
-    # 1. Nova Embeddings で埋め込みベクトル生成
-    # 2. OpenSearch Serverless で k-NN 検索
-
-    # Placeholder results
-    mock_results = [
-        SearchResult(
-            document_id="doc-001",
-            score=0.95,
-            content_type="text",
-            title="Transcription: Customer Support Call #12345",
-            snippet="Customer reported issue with product delivery...",
-            metadata={"source": "audio-service", "original_audio_id": "audio-001"}
-        ),
-        SearchResult(
-            document_id="doc-002",
-            score=0.87,
-            content_type="video",
-            title="Quality Control Analysis: Assembly Line B",
-            snippet="Detected anomaly at timestamp 41.13s...",
-            metadata={"source": "video-service", "original_video_id": "video-002"}
+    try:
+        # 1. クエリのベクトル化
+        query_embedding = await generate_embedding_vector(
+            text=query.query_text,
+            image_base64=query.query_image_base64
         )
-    ]
 
-    processing_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+        # 2. DynamoDB からインデックス済みドキュメントを取得
+        # Note: 大規模データの場合はページネーションが必要
+        response = dynamodb_client.query(
+            TableName=READ_MODEL_TABLE,
+            KeyConditionExpression='pk = :pk',
+            ExpressionAttributeValues={
+                ':pk': {'S': 'VECTOR_INDEX'}
+            },
+            Limit=1000,
+        )
 
-    return SearchResponse(
-        query_id=query_id,
-        total_results=len(mock_results),
-        results=mock_results[:query.top_k],
-        processing_time_ms=processing_time
-    )
+        # 3. 類似度計算
+        results = []
+        for item in response.get('Items', []):
+            doc_embedding = json.loads(item.get('embedding', {}).get('S', '[]'))
+            if doc_embedding:
+                score = cosine_similarity(query_embedding, doc_embedding)
+                results.append({
+                    'document_id': item.get('document_id', {}).get('S', ''),
+                    'score': score,
+                    'content_type': item.get('content_type', {}).get('S', 'text'),
+                    'title': item.get('title', {}).get('S'),
+                    'snippet': item.get('content', {}).get('S', '')[:200],
+                    'metadata': json.loads(item.get('metadata', {}).get('S', '{}')),
+                })
+
+        # 4. スコア順にソート
+        results.sort(key=lambda x: x['score'], reverse=True)
+        top_results = results[:query.top_k]
+
+        processing_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+
+        return SearchResponse(
+            query_id=query_id,
+            total_results=len(top_results),
+            results=[SearchResult(**r) for r in top_results],
+            processing_time_ms=processing_time
+        )
+
+    except Exception as e:
+        logger.error(f"Search failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Search failed: {str(e)}"
+        )
 
 
 @app.post("/index", response_model=IndexResponse, status_code=status.HTTP_201_CREATED)
@@ -137,19 +214,42 @@ async def index_document(request: IndexRequest):
     """
     ドキュメントをベクトルインデックスに登録します。
     
-    Nova Embeddings で埋め込みを生成し、OpenSearch Serverless に保存します。
+    Nova Embeddings で埋め込みを生成し、DynamoDB に保存します。
     """
     logger.info(f"Indexing document: {request.document_id}")
 
-    # 実際の実装では:
-    # 1. Nova Embeddings で埋め込み生成
-    # 2. OpenSearch Serverless にインデックス
+    try:
+        # 1. ベクトル生成
+        embedding = await generate_embedding_vector(text=request.content)
 
-    return IndexResponse(
-        document_id=request.document_id,
-        status="INDEXED",
-        indexed_at=datetime.utcnow().isoformat()
-    )
+        # 2. DynamoDB に保存
+        indexed_at = datetime.utcnow().isoformat()
+        dynamodb_client.put_item(
+            TableName=READ_MODEL_TABLE,
+            Item={
+                'pk': {'S': 'VECTOR_INDEX'},
+                'sk': {'S': f"DOC#{request.document_id}"},
+                'document_id': {'S': request.document_id},
+                'content': {'S': request.content},
+                'content_type': {'S': request.content_type},
+                'embedding': {'S': json.dumps(embedding)},
+                'metadata': {'S': json.dumps(request.metadata)},
+                'indexed_at': {'S': indexed_at},
+            }
+        )
+
+        return IndexResponse(
+            document_id=request.document_id,
+            status="INDEXED",
+            indexed_at=indexed_at
+        )
+
+    except Exception as e:
+        logger.error(f"Indexing failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Indexing failed: {str(e)}"
+        )
 
 
 @app.post("/embeddings", response_model=EmbeddingResponse)
@@ -165,15 +265,24 @@ async def generate_embedding(request: EmbeddingRequest):
 
     logger.info("Generating embedding")
 
-    # 実際の実装では Nova Embeddings API を呼び出す
-    # Placeholder 1024 次元ベクトル
-    mock_embedding = [0.0] * 1024
+    try:
+        embedding = await generate_embedding_vector(
+            text=request.text,
+            image_base64=request.image_base64
+        )
 
-    return EmbeddingResponse(
-        embedding=mock_embedding,
-        dimension=1024,
-        model_id="amazon.titan-embed-image-v1"
-    )
+        return EmbeddingResponse(
+            embedding=embedding,
+            dimension=len(embedding),
+            model_id=NOVA_EMBEDDINGS_MODEL_ID
+        )
+
+    except Exception as e:
+        logger.error(f"Embedding generation failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Embedding generation failed: {str(e)}"
+        )
 
 
 @app.delete("/index/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -182,7 +291,21 @@ async def delete_document(document_id: str):
     ドキュメントをベクトルインデックスから削除します。
     """
     logger.info(f"Deleting document from index: {document_id}")
-    # 実際の実装では OpenSearch から削除
+
+    try:
+        dynamodb_client.delete_item(
+            TableName=READ_MODEL_TABLE,
+            Key={
+                'pk': {'S': 'VECTOR_INDEX'},
+                'sk': {'S': f"DOC#{document_id}"},
+            }
+        )
+    except Exception as e:
+        logger.error(f"Delete failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Delete failed: {str(e)}"
+        )
 
 
 @app.get("/health", response_model=Dict[str, str])
@@ -191,4 +314,3 @@ async def health_check():
     Search Service のヘルスチェックエンドポイント。
     """
     return {"status": "ok", "service": "search-service", "message": "Service is healthy"}
-
