@@ -1,7 +1,11 @@
 """
-Data Stack
+Data Stack (Serverless)
 
-DynamoDB, S3, ElastiCache Redis
+DynamoDB (On-Demand), S3
+- Event Store (Event Sourcing)
+- Read Model (CQRS)
+- Session Memory (TTL-based, Redis代替)
+- Content Bucket (メディアファイル)
 """
 from aws_cdk import (
     NestedStack,
@@ -9,25 +13,20 @@ from aws_cdk import (
     Duration,
     aws_dynamodb as dynamodb,
     aws_s3 as s3,
-    aws_elasticache as elasticache,
-    aws_ec2 as ec2,
 )
 from constructs import Construct
 
 
 class DataStack(NestedStack):
-    """データ層のリソースを管理するスタック。"""
+    """サーバレスデータ層のリソースを管理するスタック。"""
 
     def __init__(
         self,
         scope: Construct,
         construct_id: str,
-        vpc: ec2.IVpc,
         **kwargs
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
-
-        self.vpc = vpc
 
         # =================================================================
         # DynamoDB Tables
@@ -81,6 +80,37 @@ class DataStack(NestedStack):
             removal_policy=RemovalPolicy.DESTROY,
         )
 
+        # Session Memory Table (Redis代替 - TTL付きDynamoDB)
+        # Agent Core の短期メモリ管理
+        self.session_table = dynamodb.Table(
+            self, 'SessionMemory',
+            table_name='nova-session-memory',
+            partition_key=dynamodb.Attribute(
+                name='session_id',
+                type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name='sk',
+                type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            time_to_live_attribute='ttl',  # TTL for automatic expiration
+            removal_policy=RemovalPolicy.DESTROY,
+        )
+
+        # GSI for user-based queries
+        self.session_table.add_global_secondary_index(
+            index_name='user-index',
+            partition_key=dynamodb.Attribute(
+                name='user_id',
+                type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name='created_at',
+                type=dynamodb.AttributeType.STRING
+            ),
+        )
+
         # =================================================================
         # S3 Bucket
         # =================================================================
@@ -115,46 +145,4 @@ class DataStack(NestedStack):
                 )
             ],
             removal_policy=RemovalPolicy.RETAIN,
-        )
-
-        # =================================================================
-        # ElastiCache Redis (Agent Core Memory)
-        # =================================================================
-
-        # Redis Security Group
-        self.redis_security_group = ec2.SecurityGroup(
-            self, 'RedisSecurityGroup',
-            vpc=vpc,
-            description='Security group for Redis cluster',
-            allow_all_outbound=True,
-        )
-
-        self.redis_security_group.add_ingress_rule(
-            ec2.Peer.ipv4(vpc.vpc_cidr_block),
-            ec2.Port.tcp(6379),
-            'Allow Redis access from VPC',
-        )
-
-        # Redis Subnet Group
-        redis_subnet_group = elasticache.CfnSubnetGroup(
-            self, 'RedisSubnetGroup',
-            description='Subnet group for Nova Redis',
-            subnet_ids=[s.subnet_id for s in vpc.isolated_subnets],
-            cache_subnet_group_name='nova-redis-subnet-group',
-        )
-
-        # Redis Replication Group
-        self.redis_cluster = elasticache.CfnReplicationGroup(
-            self, 'RedisCluster',
-            replication_group_description='Nova Agent Core session/memory cache',
-            engine='redis',
-            engine_version='7.0',
-            cache_node_type='cache.t4g.medium',
-            num_cache_clusters=2,
-            automatic_failover_enabled=True,
-            multi_az_enabled=True,
-            cache_subnet_group_name=redis_subnet_group.ref,
-            security_group_ids=[self.redis_security_group.security_group_id],
-            at_rest_encryption_enabled=True,
-            transit_encryption_enabled=True,
         )

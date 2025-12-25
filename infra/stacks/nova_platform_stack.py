@@ -1,7 +1,8 @@
 """
-Nova Platform Main Stack
+Nova Platform Main Stack (Serverless)
 
-ECS Fargate + Agent Core ベースのメインスタック。
+Lambda + API Gateway ベースのサーバレスメインスタック。
+VPC不要でコスト最適化。
 """
 from aws_cdk import (
     Stack,
@@ -9,41 +10,43 @@ from aws_cdk import (
 )
 from constructs import Construct
 
-from infra.stacks.network_stack import NetworkStack
 from infra.stacks.data_stack import DataStack
 from infra.stacks.compute_stack import ComputeStack
+from infra.stacks.api_stack import ApiStack
 from infra.stacks.events_stack import EventsStack
 
 
 class NovaPlatformStack(Stack):
-    """Nova Platform のメインスタック (ECS Fargate)。"""
+    """Nova Platform のメインスタック (Serverless)。"""
 
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        # Network Stack (VPC, Subnets, VPC Endpoints)
-        network_stack = NetworkStack(self, 'Network')
+        # Data Stack (DynamoDB, S3) - VPC不要
+        data_stack = DataStack(self, 'Data')
 
-        # Data Stack (DynamoDB, S3, Redis)
-        data_stack = DataStack(
-            self, 'Data',
-            vpc=network_stack.vpc,
-        )
-
-        # Compute Stack (ECS Fargate Services)
+        # Compute Stack (Lambda Functions)
         compute_stack = ComputeStack(
             self, 'Compute',
-            vpc=network_stack.vpc,
             event_store_table=data_stack.event_store_table,
             read_model_table=data_stack.read_model_table,
+            session_table=data_stack.session_table,
             content_bucket=data_stack.content_bucket,
-            redis_cluster=data_stack.redis_cluster,
+        )
+
+        # API Stack (API Gateway)
+        api_stack = ApiStack(
+            self, 'Api',
+            agent_core_fn=compute_stack.agent_core_fn,
+            audio_fn=compute_stack.audio_fn,
+            video_fn=compute_stack.video_fn,
+            search_fn=compute_stack.search_fn,
         )
 
         # Events Stack (EventBridge)
         events_stack = EventsStack(self, 'Events')
 
         # Outputs
-        CfnOutput(self, 'ALBEndpoint', value=compute_stack.alb_dns_name)
+        CfnOutput(self, 'ApiEndpoint', value=api_stack.api_url)
         CfnOutput(self, 'ContentBucketName', value=data_stack.content_bucket.bucket_name)
-        CfnOutput(self, 'ECSClusterName', value=compute_stack.cluster.cluster_name)
+        CfnOutput(self, 'AgentCoreECRRepo', value=compute_stack.agent_core_repo.repository_uri)

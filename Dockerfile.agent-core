@@ -1,0 +1,23 @@
+# Agent Core Lambda Container Image
+# 
+# Strands Agent SDK を使用した Agent Core をコンテナイメージとしてパッケージ化。
+# Lambda Web Adapter を使用して FastAPI を Lambda で実行可能にする。
+
+FROM public.ecr.aws/lambda/python:3.12
+
+# Lambda Web Adapter for FastAPI support (optional)
+# COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:0.8.1 /lambda-adapter /opt/extensions/lambda-adapter
+
+# Install dependencies
+COPY requirements.txt ${LAMBDA_TASK_ROOT}/
+RUN pip install --no-cache-dir -r ${LAMBDA_TASK_ROOT}/requirements.txt
+
+# Copy source code
+COPY src/ ${LAMBDA_TASK_ROOT}/src/
+
+# Set Python path
+ENV PYTHONPATH=${LAMBDA_TASK_ROOT}
+
+# Lambda handler
+CMD ["src.handlers.agent.handler.lambda_handler"]
+
