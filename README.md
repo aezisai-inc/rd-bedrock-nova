@@ -12,10 +12,12 @@
 
 | 技術要素 | 検証内容 |
 |---------|---------|
-| **Bedrock Nova Series** | Nova Sonic (音声), Nova Omni (映像), Nova Multimodal Embeddings |
-| **Strands Agent Core** | ツールオーケストレーション、Memory 管理、Guardrails |
+| **Nova Sonic** | 双方向ストリーミング音声会話 (InvokeModelWithBidirectionalStream) |
+| **Nova Omni** | 映像理解・時系列分析・異常検知 |
+| **Nova Embeddings** | マルチモーダル埋め込み (1024次元) |
+| **AgentCore Runtime** | WebSocket 双方向ストリーミング、セッション分離、8時間実行 |
+| **Strands Agent SDK** | ツールオーケストレーション、Memory 管理、Guardrails |
 | **S3 Vectors** | OpenSearch 代替のコスト効率ベクトル検索 (Preview 2025.07~) |
-| **サーバレスアーキテクチャ** | Lambda + コンテナイメージによる低コスト運用 |
 
 ### Why (なぜ必要か)
 
@@ -32,19 +34,49 @@
 
 ---
 
-## 🏗️ アーキテクチャ（サーバレス構成）
+## 🏗️ アーキテクチャ
+
+### Nova Sonic 双方向ストリーミング (AgentCore Runtime)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│                    SERVERLESS ARCHITECTURE (Lambda + Container Images)           │
+│                    NOVA SONIC REAL-TIME VOICE CONVERSATION                       │
+│                                                                                  │
+│  ┌──────────┐    WebSocket (wss://)    ┌───────────────────────────────────┐   │
+│  │  Client  │ ←──────────────────────→ │  AgentCore Runtime                │   │
+│  │ (Browser │    Audio Stream (PCM)     │                                   │   │
+│  │  /Mobile)│    + JSON Events          │  • WebSocket Handler (port 8080)  │   │
+│  └──────────┘                           │  • Session Isolation (microVM)    │   │
+│                                         │  • 8 hours max execution          │   │
+│                                         │  • Strands Agent SDK              │   │
+│                                         └───────────────┬───────────────────┘   │
+│                                                         │                        │
+│                                                         ▼                        │
+│                                         ┌───────────────────────────────────┐   │
+│                                         │  Nova Sonic (Bedrock)             │   │
+│                                         │                                   │   │
+│                                         │  InvokeModelWithBidirectionalStream│   │
+│                                         │                                   │   │
+│                                         │  • ASR (Speech-to-Text)           │   │
+│                                         │  • TTS (Text-to-Speech)           │   │
+│                                         │  • Turn Detection                 │   │
+│                                         │  • Tool Use                       │   │
+│                                         │  • Barge-in Handling              │   │
+│                                         └───────────────────────────────────┘   │
+│                                                                                  │
+│  Voices: tiffany, matthew, amy, brian (+ aria, pedro for Nova 2 Sonic)          │
+│  Languages: en-US, en-GB, es-ES, fr-FR, de-DE, it-IT, pt-BR, hi-IN              │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### バッチ処理 (Lambda + API Gateway)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                    SERVERLESS BATCH PROCESSING (Lambda + API Gateway)            │
 │                                                                                  │
 │  ┌─────────────────────────────────────────────────────────────────────────┐    │
-│  │                              Internet                                    │    │
-│  └────────────────────────────────┬────────────────────────────────────────┘    │
-│                                   │                                              │
-│                                   ▼                                              │
-│  ┌─────────────────────────────────────────────────────────────────────────┐    │
-│  │                    API Gateway (REST + WebSocket)                        │    │
+│  │                    API Gateway (REST)                                    │    │
 │  │                    • Throttling  • API Key  • WAF統合                   │    │
 │  └────────────────────────────────┬────────────────────────────────────────┘    │
 │                                   │                                              │
@@ -65,12 +97,12 @@
 │  │  ┌────────────┐        ┌────────────┐        ┌────────────┐            │    │
 │  │  │  Lambda:   │        │  Lambda:   │        │  Lambda:   │            │    │
 │  │  │  Audio     │        │  Video     │        │  Search    │            │    │
-│  │  │  (256MB)   │        │  (512MB)   │        │  (256MB)   │            │    │
+│  │  │  (S3 File) │        │  (512MB)   │        │  (256MB)   │            │    │
 │  │  │            │        │            │        │            │            │    │
-│  │  │ Nova Sonic │        │ Nova Omni  │        │ Nova       │            │    │
-│  │  │ • 音声認識 │        │ • 映像解析 │        │ Embeddings │            │    │
-│  │  │ • 話者識別 │        │ • 時系列   │        │ + S3       │            │    │
-│  │  │ • 感情分析 │        │ • 異常検知 │        │ Vectors    │            │    │
+│  │  │ S3 → 処理  │        │ Nova Omni  │        │ Nova       │            │    │
+│  │  │ (非同期)   │        │ • 映像解析 │        │ Embeddings │            │    │
+│  │  │            │        │ • 時系列   │        │ + S3       │            │    │
+│  │  │            │        │ • 異常検知 │        │ Vectors    │            │    │
 │  │  └────────────┘        └────────────┘        └────────────┘            │    │
 │  │                                                                         │    │
 │  └─────────────────────────────────────────────────────────────────────────┘    │

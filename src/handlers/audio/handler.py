@@ -1,16 +1,21 @@
 """
-Audio Service Lambda Handler
+Audio Service Lambda Handler (非ストリーミング / S3ファイル処理用)
 
-Nova Sonic を使用した音声処理:
-- 文字起こし (transcription) - リアルタイム対応
-- 感情分析 (sentiment analysis)
-- 話者識別 (speaker diarization)
-- 音声品質検出
+Nova Sonic 双方向ストリーミングは websocket_handler.py を使用。
+このハンドラーは S3 上の音声ファイルを処理する REST API を提供。
+
+リアルタイム音声会話:
+    → websocket_handler.py (AgentCore Runtime + WebSocket)
+    → wss://bedrock-agentcore.<region>.amazonaws.com/runtimes/<arn>/ws
+
+S3 ファイル処理:
+    → このハンドラー (Lambda + API Gateway)
+    → POST /audio/upload → S3 → POST /audio/transcribe
 
 技術仕様:
 - 入力形式: WAV, MP3, FLAC
 - サンプリングレート: 8kHz〜48kHz
-- 言語: 日本語, 英語 他
+- 言語: en-US, en-GB, es-ES, fr-FR, de-DE, it-IT, pt-BR, hi-IN
 """
 import json
 import os

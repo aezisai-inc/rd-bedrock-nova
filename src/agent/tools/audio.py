@@ -1,45 +1,55 @@
 """
-Audio Tools - Nova Sonic Integration
+Audio Tools - Nova Sonic Integration (AgentCore Runtime + WebSocket)
 
 Nova Sonic を使用した音声処理ツール:
+- 双方向ストリーミング (Bidirectional Streaming)
 - 音声→テキスト文字起こし (リアルタイム対応)
 - 話者識別 (Speaker Diarization)
 - 感情分析 (Sentiment & Emotion)
-- ノイズ耐性処理
+
+アーキテクチャ:
+- AgentCore Runtime: WebSocket 双方向ストリーミング
+- Nova Sonic: InvokeModelWithBidirectionalStream API
+- Strands Agent SDK: ツールオーケストレーション
 
 技術仕様:
-- 入力形式: WAV, MP3, FLAC
-- サンプリングレート: 8kHz〜48kHz
-- 処理速度: リアルタイム (1倍速以上)
-- 精度: 清音環境で95%以上
+- 入力形式: PCM 16-bit, 16kHz または 8kHz (テレフォニー)
+- 出力形式: PCM 16-bit, 24kHz
+- 言語: en-US, en-GB, es-ES, fr-FR, de-DE, it-IT, pt-BR, hi-IN
 """
 import os
 import json
 import logging
-import time
-import random
-import hashlib
-from typing import Optional, AsyncIterator
+import asyncio
+import base64
+import uuid
+from typing import AsyncIterator, Optional
 from dataclasses import dataclass, field, asdict
 from functools import wraps
-from datetime import datetime
+from datetime import datetime, timezone
 
 import boto3
-from botocore.exceptions import ClientError
 
 logger = logging.getLogger(__name__)
 
-# Nova Sonic Model ID
-NOVA_SONIC_MODEL_ID = os.environ.get('NOVA_SONIC_MODEL_ID', 'amazon.nova-sonic-v1')
+# Nova Sonic Model IDs
+NOVA_SONIC_V1_MODEL_ID = "amazon.nova-sonic-v1:0"
+NOVA_SONIC_V2_MODEL_ID = "amazon.nova-2-sonic-v1:0"
+DEFAULT_MODEL_ID = os.environ.get("NOVA_SONIC_MODEL_ID", NOVA_SONIC_V2_MODEL_ID)
+
+# Voice IDs
+VOICES = {
+    "tiffany": "tiffany",      # Feminine, American
+    "matthew": "matthew",      # Masculine, American
+    "amy": "amy",              # Feminine, British
+    "brian": "brian",          # Masculine, British
+    "aria": "aria",            # Feminine, Polyglot (Nova 2)
+    "pedro": "pedro",          # Masculine, Polyglot (Nova 2)
+}
 
 
 def tool(name: str, description: str):
-    """
-    Strands @tool デコレータ
-    
-    ツールのメタデータを関数に付与。
-    Agent がこのメタデータを使用してツール選択を行う。
-    """
+    """Strands @tool デコレータ"""
     def decorator(func):
         func._tool_name = name
         func._tool_description = description
@@ -57,421 +67,477 @@ def tool(name: str, description: str):
 # =============================================================================
 
 @dataclass
+class NovaSonicConfig:
+    """Nova Sonic セッション設定"""
+    model_id: str = DEFAULT_MODEL_ID
+    voice_id: str = "tiffany"
+    language: str = "en-US"
+    system_prompt: str = "You are a helpful assistant."
+    sample_rate: int = 16000  # Input: 16kHz or 8kHz
+    output_sample_rate: int = 24000  # Output: 24kHz
+    enable_turn_detection: bool = True
+    # Nova 2 Sonic features
+    vad_sensitivity: float = 0.5  # 0.0-1.0, lower = faster response
+    enable_crossmodal: bool = False  # Text + Audio in same session
+
+
+@dataclass
 class TranscriptionSegment:
-    """文字起こしセグメント"""
+    """ASR 文字起こしセグメント"""
     text: str
-    start_time: float
-    end_time: float
-    confidence: float
-    speaker_id: Optional[str] = None
+    start_time: float = 0.0
+    end_time: float = 0.0
+    is_partial: bool = False
+    role: str = "user"  # user or assistant
 
 
 @dataclass
-class TranscriptionResult:
-    """文字起こし結果"""
-    text: str
-    confidence: float
-    language: str
-    segments: list[TranscriptionSegment] = field(default_factory=list)
-    audio_duration: float = 0.0
-    processing_time: float = 0.0
-    model_id: str = NOVA_SONIC_MODEL_ID
+class AudioChunk:
+    """音声チャンク (Base64 エンコード)"""
+    data: str  # Base64 encoded PCM
+    sample_rate: int = 24000
+    timestamp: float = 0.0
 
 
 @dataclass
-class SpeakerInfo:
-    """話者情報"""
-    speaker_id: str
-    speaking_time: float
-    turn_count: int
-    segments: list[dict] = field(default_factory=list)
+class ToolUseRequest:
+    """Nova Sonic からのツール使用リクエスト"""
+    tool_use_id: str
+    tool_name: str
+    tool_input: dict
 
 
 @dataclass
-class EmotionScore:
-    """感情スコア"""
-    emotion: str  # joy, sadness, anger, fear, surprise, disgust, neutral
-    score: float
-    timestamp: Optional[float] = None
-
-
-@dataclass
-class AudioAnalysisResult:
-    """音声分析結果"""
-    sentiment: str  # positive, negative, neutral
-    sentiment_score: float
-    speakers: list[SpeakerInfo] = field(default_factory=list)
-    emotions: list[EmotionScore] = field(default_factory=list)
-    dominant_emotion: str = "neutral"
-    audio_quality: str = "good"  # good, moderate, poor
-    noise_level: float = 0.0
+class ConversationEvent:
+    """会話イベント (双方向ストリーミング用)"""
+    event_type: str  # transcription, audio, tool_use, content_end, etc.
+    data: dict = field(default_factory=dict)
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
 # =============================================================================
-# Retry Utilities
+# Nova Sonic Event Types (Input/Output)
 # =============================================================================
 
-def invoke_with_retry(
-    client,
-    model_id: str,
-    body: dict | bytes,
-    content_type: str = 'application/json',
-    max_retries: int = 3,
-) -> dict:
-    """
-    リトライ機能付きモデル呼び出し
+class NovaSonicEvents:
+    """Nova Sonic イベント定義"""
     
-    指数バックオフを使用してスロットリングに対応。
-    """
-    for attempt in range(max_retries):
-        try:
-            if isinstance(body, dict):
-                body = json.dumps(body)
-            elif isinstance(body, str):
-                body = body.encode('utf-8')
-            
-            response = client.invoke_model(
-                modelId=model_id,
-                contentType=content_type,
-                accept='application/json',
-                body=body,
-            )
-            return response
-            
-        except ClientError as e:
-            error_code = e.response.get('Error', {}).get('Code', '')
-            
-            if error_code == 'ThrottlingException':
-                wait_time = (2 ** attempt) + random.uniform(0, 1)
-                logger.warning(f"Rate limited. Waiting {wait_time:.2f}s (attempt {attempt + 1}/{max_retries})")
-                time.sleep(wait_time)
-                
-            elif error_code == 'ModelTimeoutException':
-                logger.warning(f"Model timeout (attempt {attempt + 1}/{max_retries})")
-                if attempt == max_retries - 1:
-                    raise
-                time.sleep(1)
-                
-            elif error_code in ['ServiceUnavailableException', 'InternalServerException']:
-                wait_time = (2 ** attempt) + random.uniform(0, 1)
-                logger.warning(f"Service error. Waiting {wait_time:.2f}s")
-                time.sleep(wait_time)
-                
-            else:
-                raise
-                
-        except Exception as e:
-            logger.error(f"Unexpected error: {e}")
-            if attempt == max_retries - 1:
-                raise
-            time.sleep(1)
-    
-    raise Exception(f"Failed after {max_retries} attempts")
-
-
-# =============================================================================
-# Tools
-# =============================================================================
-
-@tool(
-    name="transcribe_audio",
-    description="音声ファイルをテキストに文字起こしします。Nova Sonicを使用し、話者識別・タイムスタンプ付きセグメント出力に対応。"
-)
-async def transcribe_audio(
-    audio_url: str,
-    language: str = "ja-JP",
-    enable_speaker_diarization: bool = True,
-    max_speakers: int = 10,
-) -> TranscriptionResult:
-    """
-    音声→テキスト文字起こし (Nova Sonic)
-    
-    Args:
-        audio_url: S3 URL or presigned URL of audio file
-        language: Language code (default: ja-JP)
-        enable_speaker_diarization: 話者識別を有効にするか
-        max_speakers: 最大話者数
+    # Input Events (Client → Nova Sonic)
+    @staticmethod
+    def session_start(config: NovaSonicConfig) -> dict:
+        """セッション開始イベント"""
+        inference_config = {
+            "maxTokens": 1024,
+            "topP": 0.9,
+            "temperature": 0.7,
+        }
         
-    Returns:
-        TranscriptionResult: 文字起こし結果（セグメント、話者情報付き）
-    """
-    start_time = time.time()
-    logger.info(f"Transcribing audio: {audio_url} (language: {language}, speakers: {enable_speaker_diarization})")
-    
-    bedrock = boto3.client('bedrock-runtime')
-    
-    request_body = {
-        'audioUrl': audio_url,
-        'language': language,
-        'task': 'transcription',
-        'settings': {
-            'enableSpeakerDiarization': enable_speaker_diarization,
-            'maxSpeakers': max_speakers,
-            'outputSegments': True,
-            'outputTimestamps': True,
-        },
-    }
-    
-    try:
-        response = invoke_with_retry(
-            client=bedrock,
-            model_id=NOVA_SONIC_MODEL_ID,
-            body=request_body,
-        )
+        audio_input_config = {
+            "mediaType": "audio/lpcm",
+            "sampleRateHertz": config.sample_rate,
+            "sampleSizeInBits": 16,
+            "channelCount": 1,
+        }
         
-        result = json.loads(response['body'].read())
-        processing_time = time.time() - start_time
+        audio_output_config = {
+            "mediaType": "audio/lpcm",
+            "sampleRateHertz": config.output_sample_rate,
+            "sampleSizeInBits": 16,
+            "channelCount": 1,
+            "voiceId": config.voice_id,
+        }
         
-        # セグメントを構造化
-        segments = []
-        for seg in result.get('segments', []):
-            segments.append(TranscriptionSegment(
-                text=seg.get('text', ''),
-                start_time=seg.get('startTime', 0.0),
-                end_time=seg.get('endTime', 0.0),
-                confidence=seg.get('confidence', 0.0),
-                speaker_id=seg.get('speakerId'),
-            ))
-        
-        return TranscriptionResult(
-            text=result.get('transcription', ''),
-            confidence=result.get('confidence', 0.0),
-            language=language,
-            segments=segments,
-            audio_duration=result.get('audioDuration', 0.0),
-            processing_time=processing_time,
-            model_id=NOVA_SONIC_MODEL_ID,
-        )
-        
-    except Exception as e:
-        logger.exception(f"Transcription failed: {e}")
-        processing_time = time.time() - start_time
-        
-        # フォールバック結果
-        return TranscriptionResult(
-            text=f"[Transcription pending: {audio_url}]",
-            confidence=0.0,
-            language=language,
-            segments=[],
-            audio_duration=0.0,
-            processing_time=processing_time,
-            model_id=NOVA_SONIC_MODEL_ID,
-        )
-
-
-@tool(
-    name="analyze_audio",
-    description="音声ファイルを分析し、感情・話者・トーンを検出します。Nova Sonicを使用。"
-)
-async def analyze_audio(
-    audio_url: str,
-    analysis_types: list[str] = None,
-    detect_noise: bool = True,
-) -> AudioAnalysisResult:
-    """
-    音声分析 (Nova Sonic)
-    
-    Args:
-        audio_url: S3 URL or presigned URL of audio file
-        analysis_types: ["sentiment", "speaker_diarization", "emotion"]
-        detect_noise: ノイズレベル検出を有効にするか
-        
-    Returns:
-        AudioAnalysisResult: 分析結果
-    """
-    analysis_types = analysis_types or ["sentiment", "speaker_diarization", "emotion"]
-    logger.info(f"Analyzing audio: {audio_url} (types: {analysis_types})")
-    
-    bedrock = boto3.client('bedrock-runtime')
-    
-    request_body = {
-        'audioUrl': audio_url,
-        'task': 'analysis',
-        'analysisTypes': analysis_types,
-        'settings': {
-            'detectNoise': detect_noise,
-            'emotionGranularity': 'segment',  # segment or overall
-        },
-    }
-    
-    try:
-        response = invoke_with_retry(
-            client=bedrock,
-            model_id=NOVA_SONIC_MODEL_ID,
-            body=request_body,
-        )
-        
-        result = json.loads(response['body'].read())
-        
-        # 話者情報を構造化
-        speakers = []
-        for spk in result.get('speakers', []):
-            speakers.append(SpeakerInfo(
-                speaker_id=spk.get('speakerId', ''),
-                speaking_time=spk.get('speakingTime', 0.0),
-                turn_count=spk.get('turnCount', 0),
-                segments=spk.get('segments', []),
-            ))
-        
-        # 感情スコアを構造化
-        emotions = []
-        for emo in result.get('emotions', []):
-            emotions.append(EmotionScore(
-                emotion=emo.get('emotion', 'neutral'),
-                score=emo.get('score', 0.0),
-                timestamp=emo.get('timestamp'),
-            ))
-        
-        # 支配的な感情を決定
-        dominant_emotion = 'neutral'
-        if emotions:
-            dominant = max(emotions, key=lambda e: e.score)
-            dominant_emotion = dominant.emotion
-        
-        return AudioAnalysisResult(
-            sentiment=result.get('sentiment', 'neutral'),
-            sentiment_score=result.get('sentimentScore', 0.5),
-            speakers=speakers,
-            emotions=emotions,
-            dominant_emotion=dominant_emotion,
-            audio_quality=result.get('audioQuality', 'good'),
-            noise_level=result.get('noiseLevel', 0.0),
-        )
-        
-    except Exception as e:
-        logger.exception(f"Audio analysis failed: {e}")
-        return AudioAnalysisResult(
-            sentiment='neutral',
-            sentiment_score=0.5,
-            speakers=[],
-            emotions=[],
-            dominant_emotion='neutral',
-            audio_quality='unknown',
-            noise_level=0.0,
-        )
-
-
-@tool(
-    name="transcribe_realtime",
-    description="リアルタイム音声ストリーミング文字起こし。WebSocket経由での低レイテンシ処理に対応。"
-)
-async def transcribe_realtime(
-    audio_stream: AsyncIterator[bytes],
-    language: str = "ja-JP",
-    sample_rate: int = 16000,
-) -> AsyncIterator[TranscriptionSegment]:
-    """
-    リアルタイム文字起こし (Nova Sonic Streaming)
-    
-    Args:
-        audio_stream: 音声データのストリーム (チャンク単位)
-        language: 言語コード
-        sample_rate: サンプリングレート (8000-48000)
-        
-    Yields:
-        TranscriptionSegment: 文字起こしセグメント (リアルタイム)
-    """
-    logger.info(f"Starting realtime transcription (language: {language}, sample_rate: {sample_rate})")
-    
-    # Note: 実際の Bedrock Streaming API が利用可能になり次第実装
-    # 現在はプレースホルダー実装
-    
-    bedrock = boto3.client('bedrock-runtime')
-    
-    buffer = b''
-    chunk_duration = 0.5  # 500ms chunks
-    chunk_size = int(sample_rate * chunk_duration * 2)  # 16-bit audio
-    
-    async for audio_chunk in audio_stream:
-        buffer += audio_chunk
-        
-        while len(buffer) >= chunk_size:
-            chunk = buffer[:chunk_size]
-            buffer = buffer[chunk_size:]
-            
-            try:
-                # ストリーミングAPI呼び出し (プレースホルダー)
-                response = invoke_with_retry(
-                    client=bedrock,
-                    model_id=NOVA_SONIC_MODEL_ID,
-                    body={
-                        'audioChunk': chunk.hex(),
-                        'language': language,
-                        'sampleRate': sample_rate,
-                        'task': 'streaming_transcription',
+        event = {
+            "event": {
+                "sessionStart": {
+                    "inferenceConfiguration": inference_config,
+                    "audioInputConfiguration": audio_input_config,
+                    "audioOutputConfiguration": audio_output_config,
+                    "systemPrompt": {
+                        "content": config.system_prompt,
                     },
-                )
-                
-                result = json.loads(response['body'].read())
-                
-                if result.get('isFinal', False):
-                    yield TranscriptionSegment(
-                        text=result.get('text', ''),
-                        start_time=result.get('startTime', 0.0),
-                        end_time=result.get('endTime', 0.0),
-                        confidence=result.get('confidence', 0.0),
-                        speaker_id=result.get('speakerId'),
-                    )
+                }
+            }
+        }
+        
+        # Nova 2 Sonic: VAD sensitivity
+        if config.vad_sensitivity != 0.5:
+            event["event"]["sessionStart"]["turnDetection"] = {
+                "vadSensitivity": config.vad_sensitivity,
+            }
+        
+        return event
+    
+    @staticmethod
+    def prompt_start() -> dict:
+        """プロンプト開始イベント"""
+        return {
+            "event": {
+                "promptStart": {
+                    "promptName": str(uuid.uuid4()),
+                }
+            }
+        }
+    
+    @staticmethod
+    def audio_input(audio_bytes: bytes) -> dict:
+        """音声入力イベント (Base64 エンコード)"""
+        return {
+            "event": {
+                "audioInput": {
+                    "audio": base64.b64encode(audio_bytes).decode("utf-8"),
+                }
+            }
+        }
+    
+    @staticmethod
+    def text_input(text: str) -> dict:
+        """テキスト入力イベント (Nova 2 Sonic crossmodal)"""
+        return {
+            "event": {
+                "textInput": {
+                    "text": text,
+                }
+            }
+        }
+    
+    @staticmethod
+    def content_end() -> dict:
+        """コンテンツ終了イベント"""
+        return {
+            "event": {
+                "contentEnd": {}
+            }
+        }
+    
+    @staticmethod
+    def prompt_end() -> dict:
+        """プロンプト終了イベント"""
+        return {
+            "event": {
+                "promptEnd": {}
+            }
+        }
+    
+    @staticmethod
+    def tool_result(tool_use_id: str, result: str, status: str = "success") -> dict:
+        """ツール結果イベント"""
+        return {
+            "event": {
+                "toolResult": {
+                    "toolUseId": tool_use_id,
+                    "status": status,
+                    "content": {
+                        "text": result,
+                    },
+                }
+            }
+        }
+    
+    @staticmethod
+    def session_end() -> dict:
+        """セッション終了イベント"""
+        return {
+            "event": {
+                "sessionEnd": {}
+            }
+        }
+
+
+# =============================================================================
+# Nova Sonic Bidirectional Stream Handler
+# =============================================================================
+
+class NovaSonicStreamHandler:
+    """
+    Nova Sonic 双方向ストリーミングハンドラー
+    
+    AgentCore Runtime の WebSocket 経由で使用。
+    """
+    
+    def __init__(self, config: NovaSonicConfig = None):
+        self.config = config or NovaSonicConfig()
+        self.session_id = str(uuid.uuid4())
+        self._input_stream = None
+        self._output_stream = None
+        self._response = None
+        self._is_active = False
+        
+    async def start_session(self) -> None:
+        """双方向ストリーミングセッションを開始"""
+        from botocore.config import Config
+        
+        bedrock_config = Config(
+            read_timeout=300,
+            retries={"max_attempts": 3},
+        )
+        
+        self.bedrock = boto3.client(
+            "bedrock-runtime",
+            config=bedrock_config,
+            region_name=os.environ.get("AWS_REGION", "us-east-1"),
+        )
+        
+        # 双方向ストリーミング開始
+        self._response = self.bedrock.invoke_model_with_bidirectional_stream(
+            modelId=self.config.model_id,
+        )
+        
+        self._input_stream = self._response["body"]
+        self._output_stream = self._response["body"]
+        self._is_active = True
+        
+        # セッション開始イベント送信
+        await self._send_event(NovaSonicEvents.session_start(self.config))
+        
+        logger.info(f"Nova Sonic session started: {self.session_id}")
+    
+    async def _send_event(self, event: dict) -> None:
+        """イベントを送信"""
+        if not self._is_active:
+            raise RuntimeError("Session not active")
+        
+        event_bytes = json.dumps(event).encode("utf-8")
+        self._input_stream.write(event_bytes)
+    
+    async def send_audio(self, audio_bytes: bytes) -> None:
+        """音声データを送信"""
+        await self._send_event(NovaSonicEvents.audio_input(audio_bytes))
+    
+    async def send_text(self, text: str) -> None:
+        """テキストを送信 (Nova 2 Sonic crossmodal)"""
+        await self._send_event(NovaSonicEvents.text_input(text))
+    
+    async def send_tool_result(self, tool_use_id: str, result: str) -> None:
+        """ツール結果を送信"""
+        await self._send_event(NovaSonicEvents.tool_result(tool_use_id, result))
+    
+    async def receive_events(self) -> AsyncIterator[ConversationEvent]:
+        """イベントを受信 (非同期ジェネレータ)"""
+        if not self._is_active:
+            raise RuntimeError("Session not active")
+        
+        async for chunk in self._output_stream:
+            try:
+                event_data = json.loads(chunk.decode("utf-8"))
+                event = self._parse_output_event(event_data)
+                if event:
+                    yield event
                     
-            except Exception as e:
-                logger.error(f"Streaming transcription error: {e}")
+                    # セッション終了チェック
+                    if event.event_type == "session_end":
+                        self._is_active = False
+                        break
+                        
+            except json.JSONDecodeError:
+                logger.warning(f"Invalid JSON in stream: {chunk}")
                 continue
+    
+    def _parse_output_event(self, event_data: dict) -> Optional[ConversationEvent]:
+        """出力イベントをパース"""
+        event = event_data.get("event", {})
+        
+        # ASR (音声認識) イベント
+        if "transcription" in event:
+            trans = event["transcription"]
+            return ConversationEvent(
+                event_type="transcription",
+                data={
+                    "text": trans.get("text", ""),
+                    "role": trans.get("role", "user"),
+                    "is_partial": trans.get("isPartial", False),
+                },
+            )
+        
+        # 音声出力イベント
+        if "audioOutput" in event:
+            audio = event["audioOutput"]
+            return ConversationEvent(
+                event_type="audio",
+                data={
+                    "audio": audio.get("audio", ""),  # Base64
+                    "sample_rate": self.config.output_sample_rate,
+                },
+            )
+        
+        # テキスト出力イベント
+        if "textOutput" in event:
+            text = event["textOutput"]
+            return ConversationEvent(
+                event_type="text",
+                data={
+                    "text": text.get("text", ""),
+                    "role": "assistant",
+                },
+            )
+        
+        # ツール使用リクエスト
+        if "toolUse" in event:
+            tool = event["toolUse"]
+            return ConversationEvent(
+                event_type="tool_use",
+                data={
+                    "tool_use_id": tool.get("toolUseId", ""),
+                    "tool_name": tool.get("toolName", ""),
+                    "tool_input": tool.get("input", {}),
+                },
+            )
+        
+        # コンテンツ終了
+        if "contentEnd" in event:
+            return ConversationEvent(
+                event_type="content_end",
+                data={},
+            )
+        
+        # セッション終了
+        if "sessionEnd" in event:
+            return ConversationEvent(
+                event_type="session_end",
+                data={},
+            )
+        
+        return None
+    
+    async def end_session(self) -> None:
+        """セッションを終了"""
+        if self._is_active:
+            await self._send_event(NovaSonicEvents.session_end())
+            self._is_active = False
+            logger.info(f"Nova Sonic session ended: {self.session_id}")
+
+
+# =============================================================================
+# AgentCore Runtime WebSocket Handler
+# =============================================================================
+
+def create_nova_sonic_websocket_handler():
+    """
+    AgentCore Runtime 用 WebSocket ハンドラーを生成
+    
+    Usage:
+        from bedrock_agentcore import BedrockAgentCoreApp
+        
+        app = BedrockAgentCoreApp()
+        
+        @app.websocket
+        async def websocket_handler(websocket, context):
+            await nova_sonic_websocket_handler(websocket, context)
+    """
+    
+    async def nova_sonic_websocket_handler(websocket, context):
+        """Nova Sonic WebSocket ハンドラー"""
+        await websocket.accept()
+        
+        # 設定を受信
+        try:
+            config_data = await websocket.receive_json()
+            config = NovaSonicConfig(**config_data.get("config", {}))
+        except Exception:
+            config = NovaSonicConfig()
+        
+        # Nova Sonic セッション開始
+        handler = NovaSonicStreamHandler(config)
+        
+        try:
+            await handler.start_session()
+            
+            # 入力タスク: クライアント → Nova Sonic
+            async def input_task():
+                async for message in websocket.iter_bytes():
+                    await handler.send_audio(message)
+            
+            # 出力タスク: Nova Sonic → クライアント
+            async def output_task():
+                async for event in handler.receive_events():
+                    await websocket.send_json(asdict(event))
+            
+            # 並行実行
+            await asyncio.gather(
+                input_task(),
+                output_task(),
+            )
+            
+        except Exception as e:
+            logger.exception(f"WebSocket error: {e}")
+            await websocket.send_json({
+                "event_type": "error",
+                "data": {"message": str(e)},
+            })
+        finally:
+            await handler.end_session()
+            await websocket.close()
+    
+    return nova_sonic_websocket_handler
+
+
+# =============================================================================
+# Tools (Strands Agent SDK 用)
+# =============================================================================
+
+@tool(
+    name="transcribe_audio_stream",
+    description="Nova Sonic を使用してリアルタイム音声文字起こしを開始します。WebSocket 接続が必要です。"
+)
+async def transcribe_audio_stream(
+    session_id: str,
+    language: str = "en-US",
+    voice_id: str = "tiffany",
+) -> dict:
+    """
+    リアルタイム音声文字起こしセッションを開始
+    
+    Args:
+        session_id: セッションID
+        language: 言語コード
+        voice_id: 音声ID
+        
+    Returns:
+        セッション情報
+    """
+    config = NovaSonicConfig(
+        language=language,
+        voice_id=voice_id,
+    )
+    
+    return {
+        "session_id": session_id,
+        "config": asdict(config),
+        "websocket_path": "/ws",
+        "message": "WebSocket 接続を開始してください",
+    }
 
 
 @tool(
-    name="detect_speech_quality",
-    description="音声品質を評価します。ノイズレベル、明瞭度、サンプリングレートの適切性をチェック。"
+    name="configure_nova_sonic",
+    description="Nova Sonic セッションの設定を生成します。"
 )
-async def detect_speech_quality(
-    audio_url: str,
+async def configure_nova_sonic(
+    system_prompt: str = "You are a helpful assistant.",
+    voice_id: str = "tiffany",
+    language: str = "en-US",
+    vad_sensitivity: float = 0.5,
 ) -> dict:
     """
-    音声品質検出
+    Nova Sonic 設定を生成
     
     Args:
-        audio_url: S3 URL or presigned URL of audio file
+        system_prompt: システムプロンプト
+        voice_id: 音声ID (tiffany, matthew, amy, brian, aria, pedro)
+        language: 言語コード
+        vad_sensitivity: VAD 感度 (0.0-1.0, 低いほど高速応答)
         
     Returns:
-        dict: 品質評価結果
+        設定オブジェクト
     """
-    logger.info(f"Detecting speech quality: {audio_url}")
+    config = NovaSonicConfig(
+        system_prompt=system_prompt,
+        voice_id=voice_id,
+        language=language,
+        vad_sensitivity=vad_sensitivity,
+    )
     
-    bedrock = boto3.client('bedrock-runtime')
-    
-    request_body = {
-        'audioUrl': audio_url,
-        'task': 'quality_assessment',
-    }
-    
-    try:
-        response = invoke_with_retry(
-            client=bedrock,
-            model_id=NOVA_SONIC_MODEL_ID,
-            body=request_body,
-        )
-        
-        result = json.loads(response['body'].read())
-        
-        return {
-            'overall_quality': result.get('overallQuality', 'unknown'),
-            'noise_level': result.get('noiseLevel', 0.0),
-            'clarity_score': result.get('clarityScore', 0.0),
-            'sample_rate': result.get('sampleRate', 0),
-            'bit_depth': result.get('bitDepth', 0),
-            'duration': result.get('duration', 0.0),
-            'issues': result.get('issues', []),
-            'recommendations': result.get('recommendations', []),
-        }
-        
-    except Exception as e:
-        logger.exception(f"Quality detection failed: {e}")
-        return {
-            'overall_quality': 'unknown',
-            'noise_level': 0.0,
-            'clarity_score': 0.0,
-            'issues': [str(e)],
-            'recommendations': [],
-        }
+    return asdict(config)
 
 
 # =============================================================================
@@ -480,19 +546,16 @@ async def detect_speech_quality(
 
 def serialize_result(result) -> dict:
     """結果をJSON直列化可能な形式に変換"""
-    if hasattr(result, '__dataclass_fields__'):
-        data = asdict(result)
-        # ネストされたデータクラスを処理
-        for key, value in data.items():
-            if isinstance(value, list):
-                data[key] = [
-                    asdict(item) if hasattr(item, '__dataclass_fields__') else item
-                    for item in value
-                ]
-        return data
+    if hasattr(result, "__dataclass_fields__"):
+        return asdict(result)
     return result
 
 
-def create_audio_hash(audio_url: str) -> str:
-    """音声URLからハッシュを生成（キャッシュキー用）"""
-    return hashlib.md5(audio_url.encode()).hexdigest()
+def decode_audio_chunk(chunk: AudioChunk) -> bytes:
+    """Base64 音声チャンクをデコード"""
+    return base64.b64decode(chunk.data)
+
+
+def encode_audio_bytes(audio_bytes: bytes) -> str:
+    """音声バイトを Base64 エンコード"""
+    return base64.b64encode(audio_bytes).decode("utf-8")

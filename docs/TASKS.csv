@@ -3,7 +3,7 @@ T001,プロジェクト構造設計,サーバレスアーキテクチャ設計�
 T002,Strands SDK統合,Lambda Container ImageでのStrands Agent SDK統合・ツールオーケストレーション基盤,completed,high,implementation,AI Assistant,2025-12-25,2025-12-25,T001,docs/02-architecture/03-12factor-agents.md,Phase 1 Agent Core基盤
 T003,DynamoDB Memory実装,Session Memory (TTL付き) + Long-term Memory実装・Redis代替,completed,high,implementation,AI Assistant,2025-12-25,2025-12-25,T002,docs/05-infrastructure/01-aws-infrastructure.md,ElastiCache廃止対応
 T004,基本Tool定義,Audio/Video/Search Toolの@tool デコレータ定義,completed,medium,implementation,AI Assistant,2025-12-25,2025-12-25,T003,README.md,Lambda handlers実装完了
-T005,Nova Sonic統合,音声認識・話者識別・感情分析機能のNova Sonic API統合,completed,medium,implementation,AI Assistant,2025-12-25,2025-12-25,T004,architecture-prot.md,リトライ・バッチ処理・品質検出実装
+T005,Nova Sonic統合,AgentCore Runtime + WebSocket双方向ストリーミング実装,completed,high,implementation,AI Assistant,2025-12-25,2025-12-25,T004,architecture-prot.md,InvokeModelWithBidirectionalStream API使用
 T006,Nova Omni統合,映像理解・時系列分析・異常検知のNova Omni API統合,pending,medium,implementation,,2025-12-25,,T004,architecture-prot.md,Phase 2 Nova Models統合
 T007,Nova Embeddings統合,マルチモーダル埋め込み生成のNova Embeddings API統合,pending,medium,implementation,,2025-12-25,,T004,architecture-prot.md,Phase 2 Nova Models統合
 T008,S3 Vectors統合,S3 Vectors (Preview) APIによるベクトル検索実装,pending,high,implementation,,2025-12-25,,T007,README.md,Phase 3 S3 Vectors統合 (GA待ち)
