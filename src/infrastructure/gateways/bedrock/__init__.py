@@ -6,6 +6,13 @@ from src.infrastructure.gateways.bedrock.nova_omni_gateway import (
     VideoAnalysisResult,
     VideoFrame,
 )
+from src.infrastructure.gateways.bedrock.nova_embeddings_gateway import (
+    NovaEmbeddingsGateway,
+    InputModality,
+    EmbeddingDimension,
+    EmbeddingResult,
+    BatchEmbeddingResult,
+)
 
 __all__ = [
     "NovaSonicGateway",
@@ -13,4 +20,9 @@ __all__ = [
     "VideoAnalysisType",
     "VideoAnalysisResult",
     "VideoFrame",
+    "NovaEmbeddingsGateway",
+    "InputModality",
+    "EmbeddingDimension",
+    "EmbeddingResult",
+    "BatchEmbeddingResult",
 ]
