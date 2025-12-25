@@ -3,6 +3,7 @@ Lambda Stack (Serverless Compute)
 
 Lambda Functions:
 - Agent Core (Container Image from ECR)
+- AG-UI Handler (AG-UI Protocol + Response Streaming)
 - Audio Handler (Nova Sonic)
 - Video Handler (Nova Omni)
 - Search Handler (Nova Embeddings)
@@ -11,6 +12,7 @@ Lambda Functions:
 from aws_cdk import (
     NestedStack,
     Duration,
+    CfnOutput,
     aws_lambda as lambda_,
     aws_ecr as ecr,
     aws_iam as iam,
@@ -84,6 +86,55 @@ class ComputeStack(NestedStack):
         event_store_table.grant_read_write_data(self.agent_core_fn)
         session_table.grant_read_write_data(self.agent_core_fn)
         content_bucket.grant_read(self.agent_core_fn)
+
+        # =================================================================
+        # AG-UI Handler Lambda (AG-UI Protocol + Response Streaming)
+        # =================================================================
+        # CopilotKit からの AG-UI プロトコルリクエストを処理
+        # Lambda Function URL でレスポンスストリーミングを有効化
+
+        self.ag_ui_fn = lambda_.DockerImageFunction(
+            self, 'AgUiFn',
+            function_name='nova-ag-ui-handler',
+            code=lambda_.DockerImageCode.from_ecr(
+                repository=self.agent_core_repo,
+                tag_or_digest='latest',
+            ),
+            memory_size=1024,
+            timeout=Duration.seconds(300),
+            environment={
+                'NOVA_ENVIRONMENT': 'production',
+                'EVENT_STORE_TABLE': event_store_table.table_name,
+                'SESSION_TABLE': session_table.table_name,
+                'CONTENT_BUCKET': content_bucket.bucket_name,
+                'AG_UI_MODE': 'true',
+            },
+            log_retention=logs.RetentionDays.ONE_WEEK,
+        )
+
+        # Lambda Function URL (Response Streaming for SSE)
+        self.ag_ui_url = self.ag_ui_fn.add_function_url(
+            auth_type=lambda_.FunctionUrlAuthType.NONE,
+            cors=lambda_.FunctionUrlCorsOptions(
+                allowed_origins=['*'],
+                allowed_methods=[lambda_.HttpMethod.POST, lambda_.HttpMethod.OPTIONS],
+                allowed_headers=['Content-Type', 'Authorization'],
+            ),
+            invoke_mode=lambda_.InvokeMode.RESPONSE_STREAM,
+        )
+
+        self.ag_ui_fn.add_to_role_policy(bedrock_policy)
+        event_store_table.grant_read_write_data(self.ag_ui_fn)
+        session_table.grant_read_write_data(self.ag_ui_fn)
+        content_bucket.grant_read(self.ag_ui_fn)
+
+        # AG-UI Endpoint URL Output
+        CfnOutput(
+            self, 'AgUiEndpointUrl',
+            value=self.ag_ui_url.url,
+            description='AG-UI Protocol Endpoint (for CopilotKit)',
+            export_name='NovaAgUiEndpointUrl',
+        )
 
         # =================================================================
         # Audio Handler Lambda (Nova Sonic)
