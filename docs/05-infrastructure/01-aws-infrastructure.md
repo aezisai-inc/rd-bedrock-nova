@@ -1,634 +1,457 @@
-# AWS インフラストラクチャ設計書（ECS Fargate + Agent Core）
+# AWS インフラストラクチャ設計書（サーバレス構成）
 
 ## 1. 全体アーキテクチャ
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    AGENT CORE + ECS FARGATE ARCHITECTURE                    │
-│                                                                              │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                       Internet                                       │    │
-│  └────────────────────────────┬────────────────────────────────────────┘    │
-│                               │                                              │
-│                               ▼                                              │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                    CloudFront + WAF                                  │    │
-│  └────────────────────────────┬────────────────────────────────────────┘    │
-│                               │                                              │
-│                               ▼                                              │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                    API Gateway (REST)                                │    │
-│  └────────────────────────────┬────────────────────────────────────────┘    │
-│                               │                                              │
-│  ┌────────────────────────────┼────────────────────────────────────────┐    │
-│  │                    VPC (10.0.0.0/16)                                 │    │
-│  │                            │                                         │    │
-│  │  ┌─────────────────────────┴─────────────────────────┐              │    │
-│  │  │              Application Load Balancer             │              │    │
-│  │  └─────────────────────────┬─────────────────────────┘              │    │
-│  │                            │                                         │    │
-│  │  ┌─────────────────────────┴─────────────────────────┐              │    │
-│  │  │ Private Subnets (ECS Fargate)                      │              │    │
-│  │  │                                                    │              │    │
-│  │  │  ┌────────────────────────────────────────────┐   │              │    │
-│  │  │  │        Agent Core Service (Coordinator)     │   │              │    │
-│  │  │  │                                            │   │              │    │
-│  │  │  │  • オーケストレーション                      │   │              │    │
-│  │  │  │  • ツール呼び出し管理                        │   │              │    │
-│  │  │  │  • セッション管理                            │   │              │    │
-│  │  │  └────────────────────────────────────────────┘   │              │    │
-│  │  │                                                    │              │    │
-│  │  │  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐     │              │    │
-│  │  │  │ Audio  │ │ Video  │ │ Search │ │ Event  │     │              │    │
-│  │  │  │Service │ │Service │ │Service │ │Projector│    │              │    │
-│  │  │  │        │ │        │ │        │ │        │     │              │    │
-│  │  │  │ Nova   │ │ Nova   │ │ Nova   │ │ CQRS   │     │              │    │
-│  │  │  │ Sonic  │ │ Omni   │ │Embeds  │ │ Read   │     │              │    │
-│  │  │  └────────┘ └────────┘ └────────┘ └────────┘     │              │    │
-│  │  └────────────────────────────────────────────────────┘              │    │
-│  │                                                                      │    │
-│  │  ┌────────────────────────────────────────────────────┐              │    │
-│  │  │ Data Tier (Isolated Subnets)                       │              │    │
-│  │  │                                                    │              │    │
-│  │  │  ┌─────────┐  ┌─────────┐  ┌─────────┐           │              │    │
-│  │  │  │ DynamoDB│  │ ElastiCache│ │OpenSearch│          │              │    │
-│  │  │  │ (VPC EP)│  │ (Redis)  │  │Serverless│          │              │    │
-│  │  │  └─────────┘  └─────────┘  └─────────┘           │              │    │
-│  │  └────────────────────────────────────────────────────┘              │    │
-│  │                                                                      │    │
-│  └──────────────────────────────────────────────────────────────────────┘    │
-│                                                                              │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │ AWS Services (via VPC Endpoints)                                     │    │
-│  │                                                                      │    │
-│  │  • S3              • Bedrock Runtime    • EventBridge               │    │
-│  │  • Secrets Manager • KMS                • CloudWatch                │    │
-│  │  • ECR             • SSM Parameter Store                            │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                         SERVERLESS ARCHITECTURE                                   │
+│                  (Lambda + API Gateway + DynamoDB + S3)                          │
+│                                                                                  │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │                              Internet                                    │    │
+│  └────────────────────────────────┬────────────────────────────────────────┘    │
+│                                   │                                              │
+│                                   ▼                                              │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │                    API Gateway (REST)                                    │    │
+│  │                    • Throttling  • API Key  • Logging                   │    │
+│  └────────────────────────────────┬────────────────────────────────────────┘    │
+│                                   │                                              │
+│  ┌────────────────────────────────┼────────────────────────────────────────┐    │
+│  │                Lambda Functions (Serverless Compute)                     │    │
+│  │                                                                          │    │
+│  │  ┌──────────────────────────────────────────────────────────────────┐   │    │
+│  │  │        Lambda: Agent Core (Container Image from ECR)              │   │    │
+│  │  │                                                                    │   │    │
+│  │  │  • Strands SDK Tool Orchestration                                 │   │    │
+│  │  │  • DynamoDB Memory (TTL-based Session)                            │   │    │
+│  │  │  • Bedrock Guardrails                                             │   │    │
+│  │  │  • Foundation Model: Claude 3.5 Sonnet                            │   │    │
+│  │  └──────────────────────────────────────────────────────────────────┘   │    │
+│  │                                │                                         │    │
+│  │         ┌──────────────────────┼──────────────────────┐                 │    │
+│  │         │                      │                      │                 │    │
+│  │         ▼                      ▼                      ▼                 │    │
+│  │  ┌────────────┐        ┌────────────┐        ┌────────────┐            │    │
+│  │  │  Lambda:   │        │  Lambda:   │        │  Lambda:   │            │    │
+│  │  │  Audio     │        │  Video     │        │  Search    │            │    │
+│  │  │  (256MB)   │        │  (512MB)   │        │  (256MB)   │            │    │
+│  │  │            │        │            │        │            │            │    │
+│  │  │ Nova Sonic │        │ Nova Omni  │        │ Nova       │            │    │
+│  │  │ • 音声認識 │        │ • 映像解析 │        │ Embeddings │            │    │
+│  │  │ • 話者識別 │        │ • 時系列   │        │ + S3       │            │    │
+│  │  │ • 感情分析 │        │ • 異常検知 │        │ Vectors    │            │    │
+│  │  └────────────┘        └────────────┘        └────────────┘            │    │
+│  │                                                                         │    │
+│  │  ┌──────────────────────────────────────────────────────────────────┐   │    │
+│  │  │  Lambda: Event Projector (DynamoDB Stream Trigger)               │   │    │
+│  │  │  • Event Sourcing → CQRS Read Model                              │   │    │
+│  │  └──────────────────────────────────────────────────────────────────┘   │    │
+│  │                                                                         │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+│                                                                                  │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │                          DATA LAYER (Serverless)                         │    │
+│  │                                                                          │    │
+│  │  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────────┐  │    │
+│  │  │ DynamoDB         │  │ S3               │  │ S3 Vectors (Preview) │  │    │
+│  │  │ (On-Demand)      │  │                  │  │                      │  │    │
+│  │  │                  │  │ • Audio files    │  │ • ベクトル検索       │  │    │
+│  │  │ • Event Store    │  │ • Video files    │  │ • 90%コスト削減      │  │    │
+│  │  │ • Session Memory │  │ • Images         │  │ • ペタバイト対応     │  │    │
+│  │  │ • Read Models    │  │ • Documents      │  │                      │  │    │
+│  │  └──────────────────┘  └──────────────────┘  └──────────────────────┘  │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+│                                                                                  │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │                          EVENT-DRIVEN (Async)                            │    │
+│  │                                                                          │    │
+│  │  EventBridge ──── Rule ──── Lambda: Event Handler                       │    │
+│  │  DynamoDB Stream ──────── Lambda: Projector                             │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## 2. Agent Core とは
+## 2. コスト比較
 
-**Agent Core** は AWS の **Strands Agents Framework** に基づくセルフホスト型エージェントフレームワークです。
+| 構成 | 月額コスト (アイドル) | 月額コスト (軽負荷) | 備考 |
+|------|---------------------|-------------------|------|
+| **ECS Fargate (2サービス)** | ~$50/月 | ~$100/月 | 最小 2 Task 常駐 |
+| **Lambda (Serverless)** | ~$0/月 | ~$5/月 | 使用量課金のみ |
+| **ElastiCache Redis** | ~$30/月 | ~$30/月 | 最小構成でも固定費 |
+| **DynamoDB TTL** | ~$0/月 | ~$1/月 | Redis代替 |
+| **OpenSearch Serverless** | ~$100/月 | ~$150/月 | 2 OCU 最低 |
+| **S3 Vectors** | ~$0/月 | ~$10/月 | 使用量課金 |
 
-### Bedrock Agents (マネージド) との違い
+**サーバレス構成の月額コスト削減: 約 90%**
 
-| 観点 | Bedrock Agents (マネージド) | Agent Core (セルフホスト) |
-|------|---------------------------|-------------------------|
-| **デプロイ** | AWS管理 | ECS/ECR にコンテナデプロイ |
-| **カスタマイズ** | 制限あり | 完全なカスタマイズ可能 |
-| **スケーリング** | 自動 | ECS Auto Scaling |
-| **料金** | API呼び出し課金 | コンピュート課金 |
-| **ツール統合** | Lambda経由 | 直接コード統合 |
-| **状態管理** | 限定的 | 自由に実装可能 |
+## 3. CDK スタック構成 (Python)
 
-### Agent Core の特徴
+```
+infra/
+├── app.py                    # CDK アプリエントリポイント
+└── stacks/
+    ├── nova_platform_stack.py  # メインスタック
+    ├── data_stack.py           # DynamoDB, S3
+    ├── compute_stack.py        # Lambda Functions
+    ├── api_stack.py            # API Gateway
+    └── events_stack.py         # EventBridge
+```
+
+### 3.1 Data Stack
 
 ```python
-# Agent Core の基本構造
-from agent_core import Agent, Tool, Memory
+# infra/stacks/data_stack.py
+from aws_cdk import (
+    NestedStack,
+    aws_dynamodb as dynamodb,
+    aws_s3 as s3,
+)
 
-class NovaCoordinatorAgent(Agent):
-    """Nova Platform のコーディネーターエージェント"""
-    
-    def __init__(self):
-        super().__init__(
-            model="anthropic.claude-3-5-sonnet",
-            tools=[
-                AudioTranscriptionTool(),
-                VideoAnalysisTool(),
-                MultimodalSearchTool(),
-            ],
-            memory=RedisMemory(),  # 短期記憶
-            long_term_memory=DynamoDBMemory(),  # 長期記憶
+class DataStack(NestedStack):
+    def __init__(self, scope, construct_id, **kwargs):
+        super().__init__(scope, construct_id, **kwargs)
+
+        # Event Store (Event Sourcing)
+        self.event_store_table = dynamodb.Table(
+            self, 'EventStore',
+            table_name='nova-event-store',
+            partition_key=dynamodb.Attribute(
+                name='pk', type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name='sk', type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            stream=dynamodb.StreamViewType.NEW_IMAGE,
         )
-    
-    async def process(self, user_input: str, context: dict) -> str:
-        # エージェントのオーケストレーションロジック
-        return await self.run(user_input, context)
+
+        # Session Memory (Redis代替 - TTL付き)
+        self.session_table = dynamodb.Table(
+            self, 'SessionMemory',
+            table_name='nova-session-memory',
+            partition_key=dynamodb.Attribute(
+                name='session_id', type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name='sk', type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            time_to_live_attribute='ttl',  # 自動期限切れ
+        )
+
+        # Read Model (CQRS)
+        self.read_model_table = dynamodb.Table(
+            self, 'ReadModel',
+            table_name='nova-read-model',
+            partition_key=dynamodb.Attribute(
+                name='pk', type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name='sk', type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+        )
+
+        # Content Bucket
+        self.content_bucket = s3.Bucket(
+            self, 'ContentBucket',
+            encryption=s3.BucketEncryption.S3_MANAGED,
+            block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
+        )
 ```
 
-## 3. CDK スタック構成
+### 3.2 Compute Stack (Lambda)
 
-```typescript
-// infra/lib/nova-platform-stack.ts
-import * as cdk from 'aws-cdk-lib';
-import { Construct } from 'constructs';
+```python
+# infra/stacks/compute_stack.py
+from aws_cdk import (
+    NestedStack,
+    Duration,
+    aws_lambda as lambda_,
+    aws_ecr as ecr,
+    aws_iam as iam,
+    aws_lambda_event_sources as event_sources,
+)
 
-export class NovaPlatformStack extends cdk.Stack {
-  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
-    super(scope, id, props);
+class ComputeStack(NestedStack):
+    def __init__(self, scope, construct_id, event_store_table, 
+                 read_model_table, session_table, content_bucket, **kwargs):
+        super().__init__(scope, construct_id, **kwargs)
 
-    // Nested Stacks (ECS Fargate)
-    const networkStack = new NetworkStack(this, 'Network');
-    const dataStack = new DataStack(this, 'Data', {
-      vpc: networkStack.vpc,
-    });
-    const computeStack = new ComputeStack(this, 'Compute', {
-      vpc: networkStack.vpc,
-      eventStore: dataStack.eventStoreTable,
-      searchCollection: dataStack.searchCollection,
-      contentBucket: dataStack.contentBucket,
-      redisCluster: dataStack.redisCluster,
-    });
-    const apiStack = new ApiStack(this, 'Api', {
-      alb: computeStack.alb,
-    });
-  }
-}
-```
+        # ECR Repository (Agent Core コンテナイメージ用)
+        self.agent_core_repo = ecr.Repository(
+            self, 'AgentCoreRepo',
+            repository_name='nova-agent-core',
+        )
 
-### 3.1 Network Stack
-
-```typescript
-// infra/lib/stacks/network-stack.ts
-import * as ec2 from 'aws-cdk-lib/aws-ec2';
-
-export class NetworkStack extends cdk.NestedStack {
-  public readonly vpc: ec2.Vpc;
-
-  constructor(scope: Construct, id: string, props?: cdk.NestedStackProps) {
-    super(scope, id, props);
-
-    this.vpc = new ec2.Vpc(this, 'NovaVpc', {
-      ipAddresses: ec2.IpAddresses.cidr('10.0.0.0/16'),
-      maxAzs: 3,
-      natGateways: 2,
-      subnetConfiguration: [
-        {
-          name: 'Public',
-          subnetType: ec2.SubnetType.PUBLIC,
-          cidrMask: 24,
-        },
-        {
-          name: 'Private',
-          subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
-          cidrMask: 24,
-        },
-        {
-          name: 'Isolated',
-          subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
-          cidrMask: 24,
-        },
-      ],
-    });
-
-    // VPC Endpoints
-    this.vpc.addGatewayEndpoint('S3Endpoint', {
-      service: ec2.GatewayVpcEndpointAwsService.S3,
-    });
-
-    this.vpc.addGatewayEndpoint('DynamoDBEndpoint', {
-      service: ec2.GatewayVpcEndpointAwsService.DYNAMODB,
-    });
-
-    this.vpc.addInterfaceEndpoint('BedrockEndpoint', {
-      service: ec2.InterfaceVpcEndpointAwsService.BEDROCK_RUNTIME,
-      privateDnsEnabled: true,
-    });
-
-    this.vpc.addInterfaceEndpoint('ECREndpoint', {
-      service: ec2.InterfaceVpcEndpointAwsService.ECR,
-      privateDnsEnabled: true,
-    });
-
-    this.vpc.addInterfaceEndpoint('ECRDockerEndpoint', {
-      service: ec2.InterfaceVpcEndpointAwsService.ECR_DOCKER,
-      privateDnsEnabled: true,
-    });
-
-    this.vpc.addInterfaceEndpoint('SecretsManagerEndpoint', {
-      service: ec2.InterfaceVpcEndpointAwsService.SECRETS_MANAGER,
-      privateDnsEnabled: true,
-    });
-  }
-}
-```
-
-### 3.2 Data Stack
-
-```typescript
-// infra/lib/stacks/data-stack.ts
-import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
-import * as opensearch from 'aws-cdk-lib/aws-opensearchserverless';
-import * as elasticache from 'aws-cdk-lib/aws-elasticache';
-import * as s3 from 'aws-cdk-lib/aws-s3';
-
-export class DataStack extends cdk.NestedStack {
-  public readonly eventStoreTable: dynamodb.Table;
-  public readonly readModelTable: dynamodb.Table;
-  public readonly searchCollection: opensearch.CfnCollection;
-  public readonly contentBucket: s3.Bucket;
-  public readonly redisCluster: elasticache.CfnReplicationGroup;
-
-  constructor(scope: Construct, id: string, props: DataStackProps) {
-    super(scope, id, props);
-
-    // Event Store Table (Event Sourcing)
-    this.eventStoreTable = new dynamodb.Table(this, 'EventStore', {
-      tableName: 'nova-event-store',
-      partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'sk', type: dynamodb.AttributeType.STRING },
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      stream: dynamodb.StreamViewType.NEW_IMAGE,
-      pointInTimeRecovery: true,
-      encryption: dynamodb.TableEncryption.AWS_MANAGED,
-    });
-
-    this.eventStoreTable.addGlobalSecondaryIndex({
-      indexName: 'gsi1',
-      partitionKey: { name: 'gsi1pk', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'gsi1sk', type: dynamodb.AttributeType.STRING },
-    });
-
-    // Read Model Table (CQRS)
-    this.readModelTable = new dynamodb.Table(this, 'ReadModel', {
-      tableName: 'nova-read-model',
-      partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'sk', type: dynamodb.AttributeType.STRING },
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-    });
-
-    // OpenSearch Serverless Collection (Vector Search)
-    const securityPolicy = new opensearch.CfnSecurityPolicy(this, 'SecurityPolicy', {
-      name: 'nova-security-policy',
-      type: 'encryption',
-      policy: JSON.stringify({
-        Rules: [{ ResourceType: 'collection', Resource: ['collection/nova-search'] }],
-        AWSOwnedKey: true,
-      }),
-    });
-
-    this.searchCollection = new opensearch.CfnCollection(this, 'SearchCollection', {
-      name: 'nova-search',
-      type: 'VECTORSEARCH',
-    });
-    this.searchCollection.addDependency(securityPolicy);
-
-    // S3 Bucket for content
-    this.contentBucket = new s3.Bucket(this, 'ContentBucket', {
-      bucketName: `nova-content-${cdk.Aws.ACCOUNT_ID}`,
-      encryption: s3.BucketEncryption.S3_MANAGED,
-      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-      lifecycleRules: [
-        {
-          transitions: [
-            {
-              storageClass: s3.StorageClass.INTELLIGENT_TIERING,
-              transitionAfter: cdk.Duration.days(30),
+        # Agent Core Lambda (Container Image)
+        self.agent_core_fn = lambda_.DockerImageFunction(
+            self, 'AgentCoreFn',
+            function_name='nova-agent-core',
+            code=lambda_.DockerImageCode.from_ecr(
+                repository=self.agent_core_repo, tag_or_digest='latest'
+            ),
+            memory_size=1024,
+            timeout=Duration.seconds(300),
+            environment={
+                'EVENT_STORE_TABLE': event_store_table.table_name,
+                'SESSION_TABLE': session_table.table_name,
             },
-          ],
-        },
-      ],
-    });
+        )
 
-    // ElastiCache Redis (Agent Core 短期記憶)
-    const redisSubnetGroup = new elasticache.CfnSubnetGroup(this, 'RedisSubnetGroup', {
-      description: 'Subnet group for Nova Redis',
-      subnetIds: props.vpc.isolatedSubnets.map(s => s.subnetId),
-    });
+        # Bedrock 権限
+        self.agent_core_fn.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],
+                resources=['arn:aws:bedrock:*:*:model/*'],
+            )
+        )
+        event_store_table.grant_read_write_data(self.agent_core_fn)
+        session_table.grant_read_write_data(self.agent_core_fn)
 
-    const redisSecurityGroup = new ec2.SecurityGroup(this, 'RedisSecurityGroup', {
-      vpc: props.vpc,
-      description: 'Security group for Redis cluster',
-    });
-    redisSecurityGroup.addIngressRule(
-      ec2.Peer.ipv4(props.vpc.vpcCidrBlock),
-      ec2.Port.tcp(6379),
-      'Allow Redis access from VPC'
-    );
+        # Audio Handler Lambda
+        self.audio_fn = lambda_.Function(
+            self, 'AudioFn',
+            function_name='nova-audio-handler',
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler='handler.lambda_handler',
+            code=lambda_.Code.from_asset('src/handlers/audio'),
+            memory_size=256,
+            timeout=Duration.seconds(300),
+            environment={
+                'EVENT_STORE_TABLE': event_store_table.table_name,
+                'CONTENT_BUCKET': content_bucket.bucket_name,
+            },
+        )
 
-    this.redisCluster = new elasticache.CfnReplicationGroup(this, 'RedisCluster', {
-      replicationGroupDescription: 'Nova Agent Core session/memory cache',
-      engine: 'redis',
-      engineVersion: '7.0',
-      cacheNodeType: 'cache.t4g.medium',
-      numCacheClusters: 2,
-      automaticFailoverEnabled: true,
-      multiAzEnabled: true,
-      cacheSubnetGroupName: redisSubnetGroup.ref,
-      securityGroupIds: [redisSecurityGroup.securityGroupId],
-      atRestEncryptionEnabled: true,
-      transitEncryptionEnabled: true,
-    });
-  }
-}
+        # Video Handler Lambda
+        self.video_fn = lambda_.Function(
+            self, 'VideoFn',
+            function_name='nova-video-handler',
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler='handler.lambda_handler',
+            code=lambda_.Code.from_asset('src/handlers/video'),
+            memory_size=512,
+            timeout=Duration.seconds(300),
+        )
+
+        # Search Handler Lambda
+        self.search_fn = lambda_.Function(
+            self, 'SearchFn',
+            function_name='nova-search-handler',
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler='handler.lambda_handler',
+            code=lambda_.Code.from_asset('src/handlers/search'),
+            memory_size=256,
+            timeout=Duration.seconds(60),
+        )
+
+        # S3 Vectors 権限 (Preview)
+        self.search_fn.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=['s3vectors:*'],
+                resources=['*'],
+            )
+        )
+
+        # Event Projector Lambda (DynamoDB Stream → Read Model)
+        self.projector_fn = lambda_.Function(
+            self, 'ProjectorFn',
+            function_name='nova-event-projector',
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler='handler.lambda_handler',
+            code=lambda_.Code.from_asset('src/handlers/projector'),
+            memory_size=256,
+            timeout=Duration.seconds(60),
+        )
+        read_model_table.grant_read_write_data(self.projector_fn)
+
+        # DynamoDB Stream Trigger
+        self.projector_fn.add_event_source(
+            event_sources.DynamoEventSource(
+                event_store_table,
+                starting_position=lambda_.StartingPosition.LATEST,
+                batch_size=100,
+            )
+        )
 ```
 
-### 3.3 Compute Stack (ECS Fargate)
+### 3.3 API Stack
 
-```typescript
-// infra/lib/stacks/compute-stack.ts
-import * as ecs from 'aws-cdk-lib/aws-ecs';
-import * as ecsPatterns from 'aws-cdk-lib/aws-ecs-patterns';
-import * as iam from 'aws-cdk-lib/aws-iam';
-import * as ecr from 'aws-cdk-lib/aws-ecr';
+```python
+# infra/stacks/api_stack.py
+from aws_cdk import (
+    NestedStack,
+    aws_apigateway as apigw,
+)
 
-export class ComputeStack extends cdk.NestedStack {
-  public readonly alb: elbv2.ApplicationLoadBalancer;
-  public readonly cluster: ecs.Cluster;
+class ApiStack(NestedStack):
+    def __init__(self, scope, construct_id, agent_core_fn, 
+                 audio_fn, video_fn, search_fn, **kwargs):
+        super().__init__(scope, construct_id, **kwargs)
 
-  constructor(scope: Construct, id: string, props: ComputeStackProps) {
-    super(scope, id, props);
+        self.api = apigw.RestApi(
+            self, 'NovaApi',
+            rest_api_name='nova-platform-api',
+            deploy_options=apigw.StageOptions(
+                stage_name='v1',
+                throttling_rate_limit=1000,
+                throttling_burst_limit=500,
+            ),
+        )
 
-    // ECS Cluster
-    this.cluster = new ecs.Cluster(this, 'NovaCluster', {
-      vpc: props.vpc,
-      containerInsights: true,
-      clusterName: 'nova-cluster',
-    });
+        # /agent/chat
+        agent = self.api.root.add_resource('agent')
+        chat = agent.add_resource('chat')
+        chat.add_method('POST', apigw.LambdaIntegration(agent_core_fn))
 
-    // ECR Repositories
-    const agentCoreRepo = new ecr.Repository(this, 'AgentCoreRepo', {
-      repositoryName: 'nova-agent-core',
-    });
+        # /audio/transcribe
+        audio = self.api.root.add_resource('audio')
+        transcribe = audio.add_resource('transcribe')
+        transcribe.add_method('POST', apigw.LambdaIntegration(audio_fn))
 
-    const audioServiceRepo = new ecr.Repository(this, 'AudioServiceRepo', {
-      repositoryName: 'nova-audio-service',
-    });
+        # /video/analyze
+        video = self.api.root.add_resource('video')
+        analyze = video.add_resource('analyze')
+        analyze.add_method('POST', apigw.LambdaIntegration(video_fn))
 
-    const videoServiceRepo = new ecr.Repository(this, 'VideoServiceRepo', {
-      repositoryName: 'nova-video-service',
-    });
+        # /search
+        search = self.api.root.add_resource('search')
+        search.add_method('POST', apigw.LambdaIntegration(search_fn))
 
-    const searchServiceRepo = new ecr.Repository(this, 'SearchServiceRepo', {
-      repositoryName: 'nova-search-service',
-    });
-
-    // =================================================================
-    // Agent Core Service (Coordinator)
-    // =================================================================
-    const agentCoreService = new ecsPatterns.ApplicationLoadBalancedFargateService(
-      this, 'AgentCoreService', {
-        cluster: this.cluster,
-        serviceName: 'nova-agent-core',
-        taskImageOptions: {
-          image: ecs.ContainerImage.fromEcrRepository(agentCoreRepo, 'latest'),
-          containerPort: 8000,
-          environment: {
-            NOVA_ENVIRONMENT: 'production',
-            REDIS_HOST: props.redisCluster.attrPrimaryEndPointAddress,
-            REDIS_PORT: props.redisCluster.attrPrimaryEndPointPort,
-            EVENT_STORE_TABLE: props.eventStore.tableName,
-            AUDIO_SERVICE_URL: 'http://nova-audio-service.nova.local:8000',
-            VIDEO_SERVICE_URL: 'http://nova-video-service.nova.local:8000',
-            SEARCH_SERVICE_URL: 'http://nova-search-service.nova.local:8000',
-          },
-        },
-        desiredCount: 2,
-        cpu: 1024,
-        memoryLimitMiB: 2048,
-        publicLoadBalancer: false,
-        cloudMapOptions: {
-          name: 'agent-core',
-          cloudMapNamespace: this.createNamespace(props.vpc),
-        },
-      }
-    );
-
-    // Bedrock 権限
-    agentCoreService.taskDefinition.taskRole.addToPrincipalPolicy(
-      new iam.PolicyStatement({
-        actions: [
-          'bedrock:InvokeModel',
-          'bedrock:InvokeModelWithResponseStream',
-        ],
-        resources: ['arn:aws:bedrock:*:*:model/*'],
-      })
-    );
-
-    props.eventStore.grantReadWriteData(agentCoreService.taskDefinition.taskRole);
-
-    // =================================================================
-    // Audio Service (Nova Sonic)
-    // =================================================================
-    const audioService = new ecsPatterns.ApplicationLoadBalancedFargateService(
-      this, 'AudioService', {
-        cluster: this.cluster,
-        serviceName: 'nova-audio-service',
-        taskImageOptions: {
-          image: ecs.ContainerImage.fromEcrRepository(audioServiceRepo, 'latest'),
-          containerPort: 8000,
-          environment: {
-            EVENT_STORE_TABLE: props.eventStore.tableName,
-            CONTENT_BUCKET: props.contentBucket.bucketName,
-            NOVA_SONIC_MODEL_ID: 'amazon.nova-sonic-v1',
-          },
-        },
-        desiredCount: 2,
-        cpu: 512,
-        memoryLimitMiB: 1024,
-        publicLoadBalancer: false,
-        cloudMapOptions: {
-          name: 'audio-service',
-        },
-      }
-    );
-
-    audioService.taskDefinition.taskRole.addToPrincipalPolicy(
-      new iam.PolicyStatement({
-        actions: ['bedrock:InvokeModel'],
-        resources: ['arn:aws:bedrock:*:*:model/amazon.nova-sonic-*'],
-      })
-    );
-    props.eventStore.grantReadWriteData(audioService.taskDefinition.taskRole);
-    props.contentBucket.grantReadWrite(audioService.taskDefinition.taskRole);
-
-    // =================================================================
-    // Video Service (Nova Omni)
-    // =================================================================
-    const videoService = new ecsPatterns.ApplicationLoadBalancedFargateService(
-      this, 'VideoService', {
-        cluster: this.cluster,
-        serviceName: 'nova-video-service',
-        taskImageOptions: {
-          image: ecs.ContainerImage.fromEcrRepository(videoServiceRepo, 'latest'),
-          containerPort: 8000,
-          environment: {
-            EVENT_STORE_TABLE: props.eventStore.tableName,
-            CONTENT_BUCKET: props.contentBucket.bucketName,
-            NOVA_OMNI_MODEL_ID: 'amazon.nova-omni-v1',
-          },
-        },
-        desiredCount: 2,
-        cpu: 1024,
-        memoryLimitMiB: 2048,
-        publicLoadBalancer: false,
-        cloudMapOptions: {
-          name: 'video-service',
-        },
-      }
-    );
-
-    videoService.taskDefinition.taskRole.addToPrincipalPolicy(
-      new iam.PolicyStatement({
-        actions: ['bedrock:InvokeModel'],
-        resources: ['arn:aws:bedrock:*:*:model/amazon.nova-omni-*'],
-      })
-    );
-    props.eventStore.grantReadWriteData(videoService.taskDefinition.taskRole);
-    props.contentBucket.grantReadWrite(videoService.taskDefinition.taskRole);
-
-    // =================================================================
-    // Search Service (Nova Embeddings)
-    // =================================================================
-    const searchService = new ecsPatterns.ApplicationLoadBalancedFargateService(
-      this, 'SearchService', {
-        cluster: this.cluster,
-        serviceName: 'nova-search-service',
-        taskImageOptions: {
-          image: ecs.ContainerImage.fromEcrRepository(searchServiceRepo, 'latest'),
-          containerPort: 8000,
-          environment: {
-            SEARCH_COLLECTION_ENDPOINT: props.searchCollection.attrCollectionEndpoint,
-            CONTENT_BUCKET: props.contentBucket.bucketName,
-            NOVA_EMBEDDINGS_MODEL_ID: 'amazon.nova-multimodal-embeddings-v1',
-          },
-        },
-        desiredCount: 2,
-        cpu: 512,
-        memoryLimitMiB: 1024,
-        publicLoadBalancer: false,
-        cloudMapOptions: {
-          name: 'search-service',
-        },
-      }
-    );
-
-    searchService.taskDefinition.taskRole.addToPrincipalPolicy(
-      new iam.PolicyStatement({
-        actions: ['bedrock:InvokeModel'],
-        resources: ['arn:aws:bedrock:*:*:model/amazon.nova-multimodal-embeddings-*'],
-      })
-    );
-    searchService.taskDefinition.taskRole.addToPrincipalPolicy(
-      new iam.PolicyStatement({
-        actions: ['aoss:APIAccessAll'],
-        resources: ['*'],
-      })
-    );
-    props.contentBucket.grantRead(searchService.taskDefinition.taskRole);
-
-    // =================================================================
-    // Auto Scaling
-    // =================================================================
-    [agentCoreService, audioService, videoService, searchService].forEach(service => {
-      const scaling = service.service.autoScaleTaskCount({
-        minCapacity: 2,
-        maxCapacity: 20,
-      });
-
-      scaling.scaleOnCpuUtilization('CpuScaling', {
-        targetUtilizationPercent: 70,
-        scaleInCooldown: cdk.Duration.seconds(60),
-        scaleOutCooldown: cdk.Duration.seconds(60),
-      });
-
-      scaling.scaleOnMemoryUtilization('MemoryScaling', {
-        targetUtilizationPercent: 80,
-      });
-    });
-
-    this.alb = agentCoreService.loadBalancer;
-  }
-
-  private createNamespace(vpc: ec2.IVpc): servicediscovery.PrivateDnsNamespace {
-    return new servicediscovery.PrivateDnsNamespace(this, 'Namespace', {
-      name: 'nova.local',
-      vpc,
-    });
-  }
-}
+        self.api_url = self.api.url
 ```
 
-## 4. EventBridge 設定
+## 4. DynamoDB Session Memory (Redis代替)
 
-```typescript
-// infra/lib/constructs/event-bus.ts
-import * as events from 'aws-cdk-lib/aws-events';
-import * as targets from 'aws-cdk-lib/aws-events-targets';
+```python
+# Redis代替: DynamoDB TTL を使用したセッション管理
 
-export class NovaEventBusConstruct extends Construct {
-  public readonly eventBus: events.EventBus;
+import boto3
+from datetime import datetime, timedelta
 
-  constructor(scope: Construct, id: string, props: EventBusProps) {
-    super(scope, id);
+dynamodb = boto3.resource('dynamodb')
+session_table = dynamodb.Table('nova-session-memory')
 
-    this.eventBus = new events.EventBus(this, 'NovaEventBus', {
-      eventBusName: 'nova-events',
-    });
+def create_session(session_id: str, user_id: str) -> dict:
+    ttl = int((datetime.utcnow() + timedelta(hours=24)).timestamp())
+    
+    session_table.put_item(Item={
+        'session_id': session_id,
+        'sk': 'SESSION#METADATA',
+        'user_id': user_id,
+        'history': [],
+        'created_at': datetime.utcnow().isoformat(),
+        'ttl': ttl,  # 24時間後に自動削除
+    })
+    return {'session_id': session_id}
 
-    // ECS Task への配信 (SQS経由)
-    new events.Rule(this, 'TranscriptionToSearchRule', {
-      eventBus: this.eventBus,
-      eventPattern: {
-        source: ['nova.audio-service'],
-        detailType: ['TranscriptionCompleted'],
-      },
-      targets: [
-        new targets.SqsQueue(props.searchIndexerQueue),
-      ],
-    });
+def get_session(session_id: str) -> dict | None:
+    result = session_table.get_item(Key={
+        'session_id': session_id,
+        'sk': 'SESSION#METADATA',
+    })
+    return result.get('Item')
 
-    // Archive for replay
-    new events.Archive(this, 'NovaEventArchive', {
-      sourceEventBus: this.eventBus,
-      archiveName: 'nova-events-archive',
-      retention: cdk.Duration.days(90),
-    });
-  }
-}
+def update_history(session_id: str, history: list) -> None:
+    ttl = int((datetime.utcnow() + timedelta(hours=24)).timestamp())
+    
+    session_table.update_item(
+        Key={'session_id': session_id, 'sk': 'SESSION#METADATA'},
+        UpdateExpression='SET history = :h, #ttl = :t',
+        ExpressionAttributeNames={'#ttl': 'ttl'},
+        ExpressionAttributeValues={':h': history, ':t': ttl},
+    )
 ```
 
-## 5. サービス間通信
+## 5. S3 Vectors 統合計画
 
-```
-┌────────────────────────────────────────────────────────────────────────────┐
-│                    SERVICE MESH (Cloud Map)                                 │
-│                                                                            │
-│  ┌─────────────────────────────────────────────────────────────────────┐  │
-│  │                    agent-core.nova.local                             │  │
-│  │                         (Coordinator)                                │  │
-│  └───────────────────────────────┬─────────────────────────────────────┘  │
-│                                  │                                         │
-│            ┌─────────────────────┼─────────────────────┐                  │
-│            │                     │                     │                  │
-│            ▼                     ▼                     ▼                  │
-│  ┌─────────────────┐   ┌─────────────────┐   ┌─────────────────┐        │
-│  │audio-service    │   │video-service    │   │search-service   │        │
-│  │.nova.local      │   │.nova.local      │   │.nova.local      │        │
-│  └─────────────────┘   └─────────────────┘   └─────────────────┘        │
-│                                                                            │
-└────────────────────────────────────────────────────────────────────────────┘
+```python
+# S3 Vectors (Preview 2025.07~)
+
+import boto3
+
+# S3 Vectors クライアント（APIが利用可能になったら使用）
+# s3vectors = boto3.client('s3vectors')
+
+def create_vector_index(bucket_name: str, index_name: str):
+    """ベクトルインデックスを作成"""
+    # s3vectors.create_index(
+    #     BucketName=bucket_name,
+    #     IndexName=index_name,
+    #     IndexConfig={
+    #         'Dimension': 1024,  # Nova Embeddings
+    #         'DistanceMetric': 'cosine',
+    #     }
+    # )
+    pass
+
+def upsert_vectors(bucket_name: str, index_name: str, vectors: list):
+    """ベクトルを追加/更新"""
+    # s3vectors.upsert_vectors(
+    #     BucketName=bucket_name,
+    #     IndexName=index_name,
+    #     Vectors=vectors,
+    # )
+    pass
+
+def query_vectors(bucket_name: str, index_name: str, 
+                  query_vector: list, top_k: int = 10):
+    """類似ベクトル検索"""
+    # return s3vectors.query(
+    #     BucketName=bucket_name,
+    #     IndexName=index_name,
+    #     QueryVector=query_vector,
+    #     TopK=top_k,
+    # )
+    pass
 ```
 
 ## 6. デプロイフロー
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                         CI/CD PIPELINE                                       │
+│                         CI/CD PIPELINE (Serverless)                          │
 │                                                                              │
 │  1. Code Push (GitHub)                                                      │
 │        │                                                                     │
 │        ▼                                                                     │
-│  2. Build & Test (GitHub Actions / CodeBuild)                               │
+│  2. GitHub Actions                                                          │
+│        │                                                                     │
+│        ├── Unit Tests                                                       │
+│        ├── Lint / Type Check                                                │
 │        │                                                                     │
 │        ▼                                                                     │
-│  3. Docker Build                                                            │
+│  3. Build                                                                   │
 │        │                                                                     │
-│        ├── nova-agent-core:latest                                           │
-│        ├── nova-audio-service:latest                                        │
-│        ├── nova-video-service:latest                                        │
-│        └── nova-search-service:latest                                       │
+│        ├── Lambda Packages (zip)                                            │
+│        └── Agent Core Container (ECR push)                                  │
 │        │                                                                     │
 │        ▼                                                                     │
-│  4. Push to ECR                                                             │
+│  4. CDK Deploy                                                              │
+│        │                                                                     │
+│        ├── cdk synth                                                        │
+│        └── cdk deploy                                                       │
 │        │                                                                     │
 │        ▼                                                                     │
-│  5. ECS Rolling Update                                                      │
+│  5. Lambda 自動更新                                                         │
 │        │                                                                     │
-│        └── Fargate Tasks (Blue/Green or Rolling)                            │
+│        └── Instant deployment (no downtime)                                 │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+## 7. サーバレス構成のメリット
+
+| 観点 | ECS Fargate | Lambda (Serverless) |
+|------|-------------|---------------------|
+| **コスト (アイドル)** | ~$50/月 | ~$0/月 |
+| **スケーリング** | Auto Scaling (分単位) | 瞬時 (ミリ秒) |
+| **運用負荷** | コンテナ管理必要 | ほぼゼロ |
+| **コールドスタート** | なし | あり (Container ~1-2秒) |
+| **実行時間制限** | なし | 15分 |
+| **VPC** | 必要 | オプション |
+| **適用シーン** | 常時稼働、長時間処理 | バースト、イベント駆動 |
+
+**研究・プロトタイプには Lambda (サーバレス) が最適**

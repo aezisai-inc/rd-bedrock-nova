@@ -1,0 +1,5 @@
+# Lambda dependencies (minimal for container image)
+boto3>=1.34.0
+pydantic>=2.5.0
+structlog>=24.1.0
+
