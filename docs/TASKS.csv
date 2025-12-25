@@ -7,6 +7,6 @@ T005,Nova Sonic統合,音声認識・話者識別・感情分析機能のNova So
 T006,Nova Omni統合,映像理解・時系列分析・異常検知のNova Omni API統合,completed,medium,implementation,AI Assistant,2025-12-25,2025-12-26,T004,architecture-prot.md,NovaOmniGateway + video tools/handler実装
 T007,Nova Embeddings統合,マルチモーダル埋め込み生成のNova Embeddings API統合,completed,medium,implementation,AI Assistant,2025-12-25,2025-12-26,T004,architecture-prot.md,NovaEmbeddingsGateway + search tools/handler実装
 T008,S3 Vectors統合,S3 Vectors (Preview) APIによるベクトル検索実装,completed,high,implementation,AI Assistant,2025-12-25,2025-12-26,T007,README.md,S3VectorsGateway + search tools/handler実装
-T009,パフォーマンス計測,コールドスタート・レイテンシ・スループット測定,pending,low,testing,,2025-12-25,,T008,,Phase 4 評価
+T009,パフォーマンス計測,コールドスタート・レイテンシ・スループット測定,completed,low,testing,AI Assistant,2025-12-25,2025-12-26,T008,performance-baseline.md,ベンチマークツール + ベースラインドキュメント作成
 T010,コスト分析,Lambda/DynamoDB/S3実運用コスト分析・ECS比較レポート,pending,low,documentation,,2025-12-25,,T008,,Phase 4 評価
 
