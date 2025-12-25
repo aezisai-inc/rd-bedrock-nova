@@ -18,12 +18,18 @@ from src.infrastructure.gateways.bedrock import (
     InputModality,
     EmbeddingResult as GatewayEmbeddingResult,
 )
+from src.infrastructure.gateways.s3 import (
+    S3VectorsGateway,
+    DistanceMetric,
+    VectorRecord,
+)
 
 logger = logging.getLogger(__name__)
 
 
 # Gateway シングルトン
 _embeddings_gateway: Optional[NovaEmbeddingsGateway] = None
+_vectors_gateway: Optional[S3VectorsGateway] = None
 
 
 def get_embeddings_gateway() -> NovaEmbeddingsGateway:
@@ -35,6 +41,16 @@ def get_embeddings_gateway() -> NovaEmbeddingsGateway:
             model_id=os.environ.get("NOVA_EMBEDDINGS_MODEL_ID", "amazon.titan-embed-image-v1"),
         )
     return _embeddings_gateway
+
+
+def get_vectors_gateway() -> S3VectorsGateway:
+    """S3 Vectors Gateway インスタンスを取得"""
+    global _vectors_gateway
+    if _vectors_gateway is None:
+        _vectors_gateway = S3VectorsGateway(
+            region=os.environ.get("AWS_REGION", "us-east-1"),
+        )
+    return _vectors_gateway
 
 
 @dataclass
@@ -91,27 +107,56 @@ async def search_knowledge(
             s3_key = query_image_url.replace("s3://", "") if query_image_url.startswith("s3://") else query_image_url
             embedding_result = await gateway.generate_image_embedding(s3_key=s3_key)
         
-        # 2. S3 Vectors で検索 (Preview API - GA後に実装)
-        # Note: S3 Vectors が GA になったら実装
+        # 2. S3 Vectors で検索
         content_bucket = os.environ.get('CONTENT_BUCKET', 'nova-content-bucket')
         vector_index = os.environ.get('VECTOR_INDEX', 'nova-vector-index')
         
-        # モック結果（S3 Vectors GA後に置き換え）
-        return {
-            "documents": [
-                {
-                    'document_id': f'doc-{i}',
-                    'score': 0.95 - (i * 0.05),
-                    'content': f'[Mock document {i} content]',
-                    'metadata': {'source': 's3-vectors'},
-                }
-                for i in range(min(3, top_k))
-            ],
-            "total_count": 3,
-            "query_id": f'query-{hash(query or query_image_url) % 10000}',
-            "embedding_dimension": embedding_result.dimension,
-            "embedding_modality": embedding_result.modality.value,
-        }
+        vectors_gateway = get_vectors_gateway()
+        
+        try:
+            # S3 Vectors API で検索
+            query_response = await vectors_gateway.query_vectors(
+                bucket_name=content_bucket,
+                index_name=vector_index,
+                query_vector=embedding_result.embedding,
+                top_k=top_k,
+                filter_expression=filters,
+            )
+            
+            return {
+                "documents": [
+                    {
+                        'document_id': r.key,
+                        'score': r.score,
+                        'metadata': r.metadata,
+                    }
+                    for r in query_response.results
+                ],
+                "total_count": len(query_response.results),
+                "query_id": f'query-{hash(query or query_image_url) % 10000}',
+                "embedding_dimension": embedding_result.dimension,
+                "embedding_modality": embedding_result.modality.value,
+                "vectors_scanned": query_response.total_vectors_scanned,
+            }
+        except Exception as vectors_error:
+            # S3 Vectors未対応リージョンの場合はモック結果を返す
+            logger.warning(f"S3 Vectors query failed (may not be GA): {vectors_error}")
+            return {
+                "documents": [
+                    {
+                        'document_id': f'doc-{i}',
+                        'score': 0.95 - (i * 0.05),
+                        'content': f'[Mock document {i} - S3 Vectors not available]',
+                        'metadata': {'source': 'mock', 'reason': 's3-vectors-not-available'},
+                    }
+                    for i in range(min(3, top_k))
+                ],
+                "total_count": 3,
+                "query_id": f'query-{hash(query or query_image_url) % 10000}',
+                "embedding_dimension": embedding_result.dimension,
+                "embedding_modality": embedding_result.modality.value,
+                "warning": "S3 Vectors API not available, using mock results",
+            }
         
     except Exception as e:
         logger.exception(f"Knowledge search failed: {e}")
@@ -294,3 +339,215 @@ async def compute_similarity(
             "similarity": 0.0,
             "error": str(e),
         }
+
+
+# ========== S3 Vectors Tools ==========
+
+@tool(
+    name="create_vector_index",
+    description="S3 Vectorsにベクトルインデックスを作成します。"
+)
+async def create_vector_index(
+    bucket_name: str,
+    index_name: str,
+    dimension: int = 1024,
+    distance_metric: str = "cosine",
+) -> dict:
+    """
+    ベクトルインデックスを作成 (S3 Vectors)
+    
+    Args:
+        bucket_name: S3バケット名
+        index_name: インデックス名
+        dimension: ベクトル次元数
+        distance_metric: 距離メトリック (cosine, euclidean, dotProduct)
+        
+    Returns:
+        dict: インデックス情報
+    """
+    logger.info(f"Creating vector index: {bucket_name}/{index_name}")
+    
+    gateway = get_vectors_gateway()
+    
+    metric_mapping = {
+        "cosine": DistanceMetric.COSINE,
+        "euclidean": DistanceMetric.EUCLIDEAN,
+        "dotProduct": DistanceMetric.DOT_PRODUCT,
+    }
+    metric = metric_mapping.get(distance_metric, DistanceMetric.COSINE)
+    
+    try:
+        result = await gateway.create_index(
+            bucket_name=bucket_name,
+            index_name=index_name,
+            dimension=dimension,
+            distance_metric=metric,
+        )
+        
+        return {
+            "bucket_name": result.bucket_name,
+            "index_name": result.index_name,
+            "dimension": result.dimension,
+            "distance_metric": result.distance_metric.value,
+            "state": result.state.value,
+        }
+    except Exception as e:
+        logger.exception(f"Create index failed: {e}")
+        return {"error": str(e)}
+
+
+@tool(
+    name="put_vectors",
+    description="S3 Vectorsにベクトルを追加・更新します。"
+)
+async def put_vectors(
+    bucket_name: str,
+    index_name: str,
+    vectors: list[dict],
+) -> dict:
+    """
+    ベクトルを追加・更新 (S3 Vectors)
+    
+    Args:
+        bucket_name: S3バケット名
+        index_name: インデックス名
+        vectors: ベクトルリスト [{"key": "...", "vector": [...], "metadata": {...}}]
+        
+    Returns:
+        dict: 結果
+    """
+    logger.info(f"Putting {len(vectors)} vectors to {bucket_name}/{index_name}")
+    
+    gateway = get_vectors_gateway()
+    
+    try:
+        records = [
+            VectorRecord(
+                key=v["key"],
+                vector=v["vector"],
+                metadata=v.get("metadata", {}),
+            )
+            for v in vectors
+        ]
+        
+        result = await gateway.put_vectors(
+            bucket_name=bucket_name,
+            index_name=index_name,
+            vectors=records,
+        )
+        
+        return result
+    except Exception as e:
+        logger.exception(f"Put vectors failed: {e}")
+        return {"error": str(e), "success_count": 0}
+
+
+@tool(
+    name="query_vectors",
+    description="S3 Vectorsでベクトル検索（kNN）を実行します。"
+)
+async def query_vectors(
+    bucket_name: str,
+    index_name: str,
+    query_vector: list[float],
+    top_k: int = 10,
+    filter_expression: dict = None,
+) -> dict:
+    """
+    ベクトル検索 (S3 Vectors)
+    
+    Args:
+        bucket_name: S3バケット名
+        index_name: インデックス名
+        query_vector: クエリベクトル
+        top_k: 返却件数
+        filter_expression: メタデータフィルタ
+        
+    Returns:
+        dict: 検索結果
+    """
+    logger.info(f"Querying vectors from {bucket_name}/{index_name}, top_k={top_k}")
+    
+    gateway = get_vectors_gateway()
+    
+    try:
+        result = await gateway.query_vectors(
+            bucket_name=bucket_name,
+            index_name=index_name,
+            query_vector=query_vector,
+            top_k=top_k,
+            filter_expression=filter_expression,
+        )
+        
+        return {
+            "results": [
+                {
+                    "key": r.key,
+                    "score": r.score,
+                    "metadata": r.metadata,
+                }
+                for r in result.results
+            ],
+            "total_count": len(result.results),
+            "vectors_scanned": result.total_vectors_scanned,
+        }
+    except Exception as e:
+        logger.exception(f"Query vectors failed: {e}")
+        return {"error": str(e), "results": []}
+
+
+@tool(
+    name="hybrid_search",
+    description="S3 Vectorsでハイブリッド検索（ベクトル+テキスト）を実行します。"
+)
+async def hybrid_search(
+    bucket_name: str,
+    index_name: str,
+    query_vector: list[float],
+    text_query: str = None,
+    top_k: int = 10,
+    vector_weight: float = 0.7,
+) -> dict:
+    """
+    ハイブリッド検索 (S3 Vectors)
+    
+    Args:
+        bucket_name: S3バケット名
+        index_name: インデックス名
+        query_vector: クエリベクトル
+        text_query: テキストクエリ
+        top_k: 返却件数
+        vector_weight: ベクトルスコアの重み (0-1)
+        
+    Returns:
+        dict: 検索結果
+    """
+    logger.info(f"Hybrid search: {bucket_name}/{index_name}, text={text_query}")
+    
+    gateway = get_vectors_gateway()
+    
+    try:
+        result = await gateway.hybrid_search(
+            bucket_name=bucket_name,
+            index_name=index_name,
+            query_vector=query_vector,
+            text_query=text_query,
+            top_k=top_k,
+            vector_weight=vector_weight,
+        )
+        
+        return {
+            "results": [
+                {
+                    "key": r.key,
+                    "score": r.score,
+                    "metadata": r.metadata,
+                }
+                for r in result.results
+            ],
+            "total_count": len(result.results),
+            "vectors_scanned": result.total_vectors_scanned,
+        }
+    except Exception as e:
+        logger.exception(f"Hybrid search failed: {e}")
+        return {"error": str(e), "results": []}
