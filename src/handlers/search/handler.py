@@ -19,6 +19,10 @@ from src.agent.tools.search import (
     generate_embeddings,
     generate_batch_embeddings,
     compute_similarity,
+    create_vector_index,
+    put_vectors,
+    query_vectors,
+    hybrid_search,
 )
 
 logger = logging.getLogger()
@@ -52,6 +56,15 @@ def lambda_handler(event: dict, context: Any) -> dict:
             return handle_similarity(body)
         elif path == '/search/index' and http_method == 'POST':
             return handle_index_document(body)
+        # S3 Vectors endpoints
+        elif path == '/vectors/index' and http_method == 'POST':
+            return handle_create_vector_index(body)
+        elif path == '/vectors' and http_method == 'POST':
+            return handle_put_vectors(body)
+        elif path == '/vectors/query' and http_method == 'POST':
+            return handle_query_vectors(body)
+        elif path == '/vectors/hybrid' and http_method == 'POST':
+            return handle_hybrid_search(body)
         else:
             return response(404, {'error': 'Not Found'})
     
@@ -265,6 +278,136 @@ def store_event(event_type: str, data: dict) -> None:
         'gsi1pk': event_type,
         'gsi1sk': timestamp,
     })
+
+
+# ========== S3 Vectors Handlers ==========
+
+def handle_create_vector_index(body: dict) -> dict:
+    """ベクトルインデックス作成"""
+    bucket_name = body.get('bucket_name')
+    index_name = body.get('index_name')
+    dimension = body.get('dimension', 1024)
+    distance_metric = body.get('distance_metric', 'cosine')
+    
+    if not bucket_name or not index_name:
+        return response(400, {'error': 'bucket_name and index_name are required'})
+    
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        result = loop.run_until_complete(
+            create_vector_index(
+                bucket_name=bucket_name,
+                index_name=index_name,
+                dimension=dimension,
+                distance_metric=distance_metric,
+            )
+        )
+    finally:
+        loop.close()
+    
+    store_event('VectorIndexCreated', {
+        'bucket_name': bucket_name,
+        'index_name': index_name,
+        'dimension': dimension,
+    })
+    
+    return response(201, result)
+
+
+def handle_put_vectors(body: dict) -> dict:
+    """ベクトル追加"""
+    bucket_name = body.get('bucket_name')
+    index_name = body.get('index_name')
+    vectors = body.get('vectors')
+    
+    if not bucket_name or not index_name or not vectors:
+        return response(400, {'error': 'bucket_name, index_name, and vectors are required'})
+    
+    if not isinstance(vectors, list):
+        return response(400, {'error': 'vectors must be an array'})
+    
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        result = loop.run_until_complete(
+            put_vectors(
+                bucket_name=bucket_name,
+                index_name=index_name,
+                vectors=vectors,
+            )
+        )
+    finally:
+        loop.close()
+    
+    store_event('VectorsPut', {
+        'bucket_name': bucket_name,
+        'index_name': index_name,
+        'count': len(vectors),
+        'success_count': result.get('success_count', 0),
+    })
+    
+    return response(200, result)
+
+
+def handle_query_vectors(body: dict) -> dict:
+    """ベクトル検索"""
+    bucket_name = body.get('bucket_name')
+    index_name = body.get('index_name')
+    query_vector = body.get('query_vector')
+    top_k = body.get('top_k', 10)
+    filter_expression = body.get('filter')
+    
+    if not bucket_name or not index_name or not query_vector:
+        return response(400, {'error': 'bucket_name, index_name, and query_vector are required'})
+    
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        result = loop.run_until_complete(
+            query_vectors(
+                bucket_name=bucket_name,
+                index_name=index_name,
+                query_vector=query_vector,
+                top_k=top_k,
+                filter_expression=filter_expression,
+            )
+        )
+    finally:
+        loop.close()
+    
+    return response(200, result)
+
+
+def handle_hybrid_search(body: dict) -> dict:
+    """ハイブリッド検索"""
+    bucket_name = body.get('bucket_name')
+    index_name = body.get('index_name')
+    query_vector = body.get('query_vector')
+    text_query = body.get('text_query')
+    top_k = body.get('top_k', 10)
+    vector_weight = body.get('vector_weight', 0.7)
+    
+    if not bucket_name or not index_name or not query_vector:
+        return response(400, {'error': 'bucket_name, index_name, and query_vector are required'})
+    
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        result = loop.run_until_complete(
+            hybrid_search(
+                bucket_name=bucket_name,
+                index_name=index_name,
+                query_vector=query_vector,
+                text_query=text_query,
+                top_k=top_k,
+                vector_weight=vector_weight,
+            )
+        )
+    finally:
+        loop.close()
+    
+    return response(200, result)
 
 
 def response(status_code: int, body: dict) -> dict:
