@@ -374,3 +374,5 @@ class NovaEmbeddingsGateway:
             return embedding
         return [x / norm for x in embedding]
 
+
+

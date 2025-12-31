@@ -476,3 +476,5 @@ class S3VectorsGateway:
             total_vectors_scanned=vector_results.total_vectors_scanned,
         )
 
+
+

@@ -367,3 +367,5 @@ if __name__ == "__main__":
     print("=" * 60)
     print_cost_report(large_workload(), "Large Workload")
 
+
+
