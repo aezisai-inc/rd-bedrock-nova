@@ -13,4 +13,5 @@ T011,AG-UI Protocol Backend,AgentCore RuntimeでのAG-UIプロトコル対応エ
 T012,Frontend CopilotKit統合,Next.js + CopilotKit UIコンポーネント統合,completed,high,implementation,AI Assistant,2025-12-26,2025-12-26,T011,AGENTCORE_COPILOTKIT_ARCHITECTURE.md,/copilotルート新規作成
 T013,認証・環境設定,Cognito JWT認証 + 環境変数設定 + CORS設定,completed,medium,implementation,AI Assistant,2025-12-26,2025-12-26,T012,README.md,Static Export対応
 T014,E2E動作確認,AG-UI + CopilotKit + AgentCore完全統合テスト,completed,high,testing,AI Assistant,2025-12-26,2025-12-26,T013,,UIからAIエージェント動作確認
+T015,ランタイム設定機能,Lambda Function URLを動的に設定可能なランタイム設定機能,completed,high,fix,AI Assistant,2025-12-31,2025-12-31,T014,src/lib/config.ts,設定ページ追加・ローカルストレージ永続化
 
