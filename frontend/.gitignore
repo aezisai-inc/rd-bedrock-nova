@@ -21,6 +21,8 @@ yarn-error.log*
 next-env.d.ts
 
 # Amplify - 自動生成ファイル
-# amplify_outputs.json は sandbox 実行時に上書きされるため
-# プレースホルダー版をコミットし、生成版は除外
 .amplify/
+amplify_outputs.json
+
+# Package lock
+package-lock.json

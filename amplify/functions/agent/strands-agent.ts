@@ -219,13 +219,12 @@ async function fetchFileFromS3(key: string): Promise<Uint8Array> {
     })
   );
 
-  const stream = response.Body as NodeJS.ReadableStream;
-  const chunks: Uint8Array[] = [];
-
-  for await (const chunk of stream) {
-    chunks.push(chunk);
+  if (!response.Body) {
+    throw new Error(`Failed to fetch file: ${key}`);
   }
 
-  return Buffer.concat(chunks);
+  // @ts-ignore - SDK streamingの型互換性のため
+  const byteArray = await response.Body.transformToByteArray();
+  return byteArray;
 }
 
