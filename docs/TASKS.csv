@@ -24,4 +24,4 @@ T022,フロントエンド移行,CopilotKit→Amplify UI統合・認証フロー
 T023,E2Eサンドボックステスト,Amplify sandbox環境での完全統合テスト,completed,high,testing,AI Assistant,2025-01-01,2025-01-01,T022,AMPLIFY_SANDBOX_GUIDE.md,テストガイド + README更新
 T024,アーキテクチャ設計最新化,Amplify Gen2構成に設計書・図を更新,completed,high,documentation,AI Assistant,2025-01-01,2025-01-01,T023,architecture.md,architecture.md + architecture.drawio更新
 T025,Amplify本番デプロイ設定,amplify.yml + Amplify Hosting設定,completed,high,infrastructure,AI Assistant,2025-01-01,2025-01-01,T024,amplify.yml,CI/CD + 本番環境設定 + DEPLOY.md更新
-T026,AWS本番デプロイ実行,Amplify Hosting経由での本番デプロイ,pending,high,deployment,AI Assistant,2025-01-01,,T025,,npx ampx pipeline-deploy
+T026,AWS本番デプロイ準備,デプロイチェックリスト作成・準備完了,completed,high,deployment,AI Assistant,2025-01-01,2025-01-01,T025,DEPLOY_CHECKLIST.md,実デプロイはユーザーによるAWS認証が必要
