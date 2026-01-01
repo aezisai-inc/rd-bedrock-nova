@@ -1,6 +1,6 @@
 # rd-bedrock-nova デプロイガイド
 
-> **AWS サーバレスアーキテクチャのデプロイ手順**
+> **Amplify Gen2 本番デプロイ手順**
 
 ---
 
@@ -9,225 +9,256 @@
 ### 必須ツール
 
 ```bash
+# Node.js 20.x 以上
+node --version  # v20.x.x
+
+# npm
+npm --version   # v10.x.x
+
 # AWS CLI v2
 aws --version
 
-# AWS CDK CLI
-cdk --version
-
-# Docker (コンテナイメージビルド用)
-docker --version
-
-# Node.js (フロントエンド用)
-node --version
-npm --version
-
-# Python 3.12+
-python --version
+# Git
+git --version
 ```
 
 ### AWS 認証
 
 ```bash
-# AWS プロファイル設定
-aws configure
+# AWS プロファイル設定確認
+aws sts get-caller-identity
 
-# または環境変数
-export AWS_ACCESS_KEY_ID=your_access_key
-export AWS_SECRET_ACCESS_KEY=your_secret_key
-export AWS_DEFAULT_REGION=ap-northeast-1
+# 必要な権限
+# - CloudFormation
+# - Cognito
+# - AppSync
+# - Lambda
+# - S3
+# - IAM
+# - Bedrock
 ```
 
 ---
 
-## 🚀 デプロイ手順
+## 🚀 デプロイ方式
 
-### 1. 依存関係インストール
+### 方式 1: サンドボックス (開発環境)
 
-```bash
-cd rd-bedrock-nova
-
-# Python 依存関係
-pip install -r requirements.txt
-
-# CDK 依存関係
-pip install aws-cdk-lib constructs
-```
-
-### 2. CDK ブートストラップ (初回のみ)
+個人開発環境を AWS にデプロイします。
 
 ```bash
-# CDK ブートストラップ (リージョンごとに1回)
-cdk bootstrap aws://ACCOUNT_ID/ap-northeast-1
-```
-
-### 3. コンテナイメージビルド
-
-```bash
-# Agent Core イメージビルド
-docker build -t nova-agent-core -f Dockerfile.agent-core .
-
-# ECR にプッシュ (CDK デプロイ後)
-# ECR リポジトリは CDK で自動作成されます
-```
-
-### 4. CDK デプロイ
-
-```bash
-# CDK synth (CloudFormation テンプレート生成)
-cdk synth
-
-# CDK デプロイ (全スタック)
-cdk deploy --all --require-approval never
-
-# または個別デプロイ
-cdk deploy NovaPlatformStack
-```
-
-### 5. デプロイ結果確認
-
-```bash
-# CloudFormation 出力を確認
-aws cloudformation describe-stacks \
-  --stack-name NovaPlatformStack \
-  --query 'Stacks[0].Outputs'
-```
-
-**出力例:**
-
-| OutputKey | 説明 |
-|-----------|------|
-| `NovaAgUiEndpointUrl` | AG-UI Lambda Function URL |
-| `NovaUploadEndpointUrl` | Upload Lambda Function URL |
-| `ApiGatewayUrl` | REST API Gateway URL |
-
----
-
-## 🖥️ フロントエンドセットアップ
-
-### 1. 依存関係インストール
-
-```bash
-cd frontend
+cd amplify
 npm install
+npx ampx sandbox
 ```
 
-### 2. 開発サーバー起動
+**特徴:**
+- 開発者ごとに独立した環境
+- ホットリロード対応
+- `amplify_outputs.json` 自動生成
+
+### 方式 2: Amplify Hosting (本番環境)
+
+#### Step 1: GitHub リポジトリ接続
+
+1. AWS Console → Amplify → 新しいアプリを作成
+2. GitHub を選択
+3. リポジトリ `rd-bedrock-nova` を選択
+4. ブランチ `main` を選択
+
+#### Step 2: ビルド設定
+
+`amplify.yml` が自動的に使用されます。
+
+```yaml
+version: 1
+applications:
+  - appRoot: .
+    frontend:
+      phases:
+        preBuild:
+          commands:
+            - cd frontend
+            - npm ci --legacy-peer-deps
+        build:
+          commands:
+            - npm run build
+      artifacts:
+        baseDirectory: frontend/.next
+        files:
+          - '**/*'
+    backend:
+      phases:
+        preBuild:
+          commands:
+            - cd amplify
+            - npm ci
+        build:
+          commands:
+            - npx ampx pipeline-deploy --branch $AWS_BRANCH --app-id $AWS_APP_ID
+```
+
+#### Step 3: 環境変数設定
+
+Amplify Console → アプリ → 環境変数:
+
+| 変数名 | 値 |
+|--------|-----|
+| `BEDROCK_REGION` | `us-east-1` |
+| `LOG_LEVEL` | `INFO` |
+
+#### Step 4: デプロイ実行
 
 ```bash
-npm run dev
+git push origin main
+# → Amplify Hosting で自動デプロイ
 ```
 
-### 3. Lambda URL 設定
+### 方式 3: 手動デプロイ (CI/CD外)
 
-1. ブラウザで `http://localhost:3000/settings/` にアクセス
-2. デプロイ結果の `NovaAgUiEndpointUrl` を入力
-3. 保存
+```bash
+cd amplify
+npm install
 
-### 4. AI Agent を試す
-
-1. `http://localhost:3000/copilot/` にアクセス
-2. ファイルをアップロード
-3. 「この音声を文字起こしして」などのメッセージを送信
+# 本番ブランチにデプロイ
+npx ampx pipeline-deploy --branch main --app-id YOUR_APP_ID
+```
 
 ---
 
-## 📊 リソース一覧
+## 📊 デプロイ後の確認
 
-### Lambda Functions
+### 1. Amplify Console で確認
 
-| 関数名 | 説明 | メモリ |
-|--------|------|--------|
-| `nova-agent-core` | Strands Agent Core | 1024MB |
-| `nova-ag-ui-handler` | AG-UI Protocol | 1024MB |
-| `nova-audio-handler` | Nova Sonic | 256MB |
-| `nova-video-handler` | Nova Omni | 512MB |
-| `nova-search-handler` | Nova Embeddings | 256MB |
-| `nova-upload-handler` | S3 Presigned URL | 256MB |
-| `nova-event-projector` | DynamoDB Stream | 256MB |
+- デプロイステータス: **Succeed**
+- フロントエンド URL: `https://main.xxxxx.amplifyapp.com`
+- Backend リソース: Cognito, AppSync, Lambda, S3
 
-### DynamoDB Tables
+### 2. 動作確認
 
-| テーブル名 | 用途 |
-|-----------|------|
-| `nova-event-store` | Event Sourcing |
-| `nova-read-model` | CQRS Read Model |
-| `nova-session-memory` | Session Memory (TTL) |
+```bash
+# フロントエンドにアクセス
+open https://main.xxxxx.amplifyapp.com
 
-### S3 Buckets
+# 1. サインアップ (Email + パスワード)
+# 2. 確認コード入力
+# 3. チャット画面でテスト
+```
 
-| バケット | 用途 |
-|----------|------|
-| `nova-content-*` | メディアファイル・ベクトルデータ |
+### 3. ログ確認
+
+```bash
+# Lambda ログ
+aws logs tail /aws/lambda/amplify-xxx-agent-handler --follow
+
+# CloudWatch メトリクス
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/Lambda \
+  --metric-name Invocations \
+  --dimensions Name=FunctionName,Value=amplify-xxx-agent-handler \
+  --start-time $(date -u -v-1H +%Y-%m-%dT%H:%M:%SZ) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) \
+  --period 300 \
+  --statistics Sum
+```
 
 ---
 
-## 💰 コスト
+## 💰 コスト見積もり
 
-### アイドル時
+### サンドボックス (開発)
 
-| リソース | 月額 |
-|----------|------|
-| Lambda | $0 |
-| DynamoDB (On-Demand) | $0 |
-| S3 | ~$0.02 |
-| **合計** | **~$0/月** |
+| リソース | 月額コスト |
+|----------|-----------|
+| Cognito | 無料 (50,000 MAU まで) |
+| AppSync | ~$4/月 (100万リクエスト) |
+| Lambda | ~$0 (無料枠内) |
+| S3 | ~$0.50 |
+| **合計** | **~$5/月** |
 
-### 軽負荷時 (1,000リクエスト/日)
+### 本番 (軽負荷)
 
-| リソース | 月額 |
-|----------|------|
-| Lambda | ~$2 |
-| DynamoDB | ~$1 |
-| Bedrock API | ~$5 |
-| **合計** | **~$10/月** |
+| リソース | 月額コスト |
+|----------|-----------|
+| Cognito | 無料 |
+| AppSync | ~$10/月 |
+| Lambda | ~$5/月 |
+| S3 | ~$2/月 |
+| Bedrock | ~$20/月 |
+| Amplify Hosting | ~$5/月 |
+| **合計** | **~$40/月** |
 
 ---
 
 ## 🔧 トラブルシューティング
 
-### CDK デプロイエラー
+### ビルドエラー: npm install 失敗
 
 ```bash
-# スタック状態確認
-aws cloudformation describe-stacks --stack-name NovaPlatformStack
-
-# ロールバック
-cdk destroy --all
+# legacy-peer-deps オプションを追加
+npm ci --legacy-peer-deps
 ```
 
-### Lambda エラー
+### Lambda タイムアウト
+
+1. Amplify Console → Functions → agent-handler
+2. タイムアウト: 300秒に変更
+
+### Bedrock アクセスエラー
 
 ```bash
-# ログ確認
-aws logs tail /aws/lambda/nova-agent-core --follow
+# Bedrock モデルアクセス確認
+aws bedrock list-foundation-models --region us-east-1
+
+# モデルアクセスリクエスト (Console)
+# Bedrock → Model access → Nova Pro, Nova Sonic, Nova Omni を有効化
 ```
 
-### ECR プッシュエラー
+### Cognito 確認コードが届かない
 
-```bash
-# ECR ログイン
-aws ecr get-login-password --region ap-northeast-1 | \
-  docker login --username AWS --password-stdin ACCOUNT_ID.dkr.ecr.ap-northeast-1.amazonaws.com
-
-# イメージプッシュ
-docker tag nova-agent-core:latest ACCOUNT_ID.dkr.ecr.ap-northeast-1.amazonaws.com/nova-agent-core:latest
-docker push ACCOUNT_ID.dkr.ecr.ap-northeast-1.amazonaws.com/nova-agent-core:latest
-```
+1. SES (Simple Email Service) の設定確認
+2. サンドボックス解除リクエスト (本番用)
 
 ---
 
 ## 🧹 クリーンアップ
 
-```bash
-# 全リソース削除
-cdk destroy --all
+### サンドボックス削除
 
-# S3 バケットは手動削除が必要な場合あり
-aws s3 rb s3://nova-content-bucket --force
+```bash
+cd amplify
+npx ampx sandbox delete
+```
+
+### 本番環境削除
+
+1. Amplify Console → アプリ → 削除
+2. CloudFormation スタックが残っている場合:
+
+```bash
+aws cloudformation delete-stack --stack-name amplify-xxx-main
+```
+
+### S3 バケット削除
+
+```bash
+# バケット内容を削除
+aws s3 rm s3://amplify-xxx-storage --recursive
+
+# バケットを削除
+aws s3 rb s3://amplify-xxx-storage
 ```
 
 ---
 
-*Last Updated: 2025-01-01*
+## 📚 関連ドキュメント
 
+- [README.md](./README.md) - プロジェクト概要
+- [docs/architecture.md](./docs/architecture.md) - アーキテクチャ設計
+- [docs/AMPLIFY_SANDBOX_GUIDE.md](./docs/AMPLIFY_SANDBOX_GUIDE.md) - サンドボックスガイド
+- [docs/E2E_TESTING.md](./docs/E2E_TESTING.md) - E2Eテストガイド
+
+---
+
+*Last Updated: 2025-01-01*
+*Architecture: Amplify Gen2 + Strands Agent + Bedrock Nova*

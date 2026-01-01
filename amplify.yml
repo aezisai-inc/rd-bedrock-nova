@@ -1,27 +1,46 @@
 version: 1
 applications:
-  - frontend:
+  - appRoot: .
+    frontend:
       phases:
         preBuild:
           commands:
+            # Node.js バージョン確認
+            - node --version
+            - npm --version
+            # Frontend 依存関係インストール
             - cd frontend
-            - npm ci
+            - npm ci --legacy-peer-deps
         build:
           commands:
+            # Next.js ビルド
             - npm run build
       artifacts:
-        baseDirectory: frontend/out
+        # Next.js SSR 対応
+        baseDirectory: frontend/.next
         files:
           - '**/*'
       cache:
         paths:
           - frontend/node_modules/**/*
+          - frontend/.next/cache/**/*
+      buildSizeConfig:
+        maxSize: 100MB
     backend:
       phases:
-        build:
+        preBuild:
           commands:
+            # Amplify Backend 依存関係インストール
             - cd amplify
             - npm ci
+        build:
+          commands:
+            # Amplify Backend デプロイ
             - npx ampx pipeline-deploy --branch $AWS_BRANCH --app-id $AWS_APP_ID
-    appRoot: .
-
+      buildSizeConfig:
+        maxSize: 500MB
+    environmentVariables:
+      # Bedrock リージョン（us-east-1 推奨: Nova モデル対応）
+      BEDROCK_REGION: us-east-1
+      # ログレベル
+      LOG_LEVEL: INFO
