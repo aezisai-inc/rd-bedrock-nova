@@ -17,4 +17,4 @@ T015,ランタイム設定機能,Lambda Function URLを動的に設定可能な�
 T016,ファイルアップロードUI,音声・動画・画像のアップロードUIコンポーネント,completed,high,frontend,AI Assistant,2025-01-01,2025-01-01,T015,architecture.md,FileUpload + FilePreview コンポーネント
 T017,S3 Presigned URL API,ファイルアップロード用のS3 presigned URL生成エンドポイント,completed,high,backend,AI Assistant,2025-01-01,2025-01-01,T016,architecture.md,Lambda Function URL対応
 T018,CDKデプロイ準備,インフラデプロイ前の最終確認・設定,completed,high,infrastructure,AI Assistant,2025-01-01,2025-01-01,T017,DEPLOY.md,デプロイガイド作成
-T019,E2E動作確認,ファイルアップロード→Nova分析の完全統合テスト,pending,high,testing,AI Assistant,2025-01-01,,T018,architecture.md,音声・動画アップロードからAI分析まで
+T019,E2E動作確認,ファイルアップロード→Nova分析の完全統合テスト,completed,high,testing,AI Assistant,2025-01-01,2025-01-01,T018,E2E_TESTING.md,テストシナリオ・手順ガイド作成完了
