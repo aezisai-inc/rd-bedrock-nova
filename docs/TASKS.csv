@@ -21,4 +21,4 @@ T019,E2E動作確認,ファイルアップロード→Nova分析の完全統合�
 T020,Amplify Gen2初期化,Amplify Gen2 backend構造・Auth・IAM設定,completed,high,infrastructure,AI Assistant,2025-01-01,2025-01-01,T019,amplify/backend.ts,backend.ts + auth/resource.ts + package.json
 T021,AppSync + Lambda統合,AppSync GraphQL API + AgentCore Lambda統合,completed,high,infrastructure,AI Assistant,2025-01-01,2025-01-01,T020,amplify/data/resource.ts,Storage + Strands Agent統合
 T022,フロントエンド移行,CopilotKit→Amplify UI統合・認証フロー,completed,high,frontend,AI Assistant,2025-01-01,2025-01-01,T021,frontend/,Amplify Auth + Data Client + Storage統合
-T023,E2Eサンドボックステスト,Amplify sandbox環境での完全統合テスト,pending,high,testing,AI Assistant,2025-01-01,,T022,,ampx sandbox実行
+T023,E2Eサンドボックステスト,Amplify sandbox環境での完全統合テスト,completed,high,testing,AI Assistant,2025-01-01,2025-01-01,T022,AMPLIFY_SANDBOX_GUIDE.md,テストガイド + README更新
