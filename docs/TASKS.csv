@@ -14,4 +14,7 @@ T012,Frontend CopilotKit統合,Next.js + CopilotKit UIコンポーネント統�
 T013,認証・環境設定,Cognito JWT認証 + 環境変数設定 + CORS設定,completed,medium,implementation,AI Assistant,2025-12-26,2025-12-26,T012,README.md,Static Export対応
 T014,E2E動作確認,AG-UI + CopilotKit + AgentCore完全統合テスト,completed,high,testing,AI Assistant,2025-12-26,2025-12-26,T013,,UIからAIエージェント動作確認
 T015,ランタイム設定機能,Lambda Function URLを動的に設定可能なランタイム設定機能,completed,high,fix,AI Assistant,2025-12-31,2025-12-31,T014,src/lib/config.ts,設定ページ追加・ローカルストレージ永続化
-
+T016,ファイルアップロードUI,音声・動画・画像のアップロードUIコンポーネント,completed,high,frontend,AI Assistant,2025-01-01,2025-01-01,T015,architecture.md,FileUpload + FilePreview コンポーネント
+T017,S3 Presigned URL API,ファイルアップロード用のS3 presigned URL生成エンドポイント,in_progress,high,backend,AI Assistant,2025-01-01,,T016,architecture.md,Lambda Function URL対応
+T018,CDKデプロイ準備,インフラデプロイ前の最終確認・設定,pending,high,infrastructure,AI Assistant,2025-01-01,,T017,architecture.md,cdk synth + cdk deploy
+T019,E2E動作確認,ファイルアップロード→Nova分析の完全統合テスト,pending,high,testing,AI Assistant,2025-01-01,,T018,architecture.md,音声・動画アップロードからAI分析まで
