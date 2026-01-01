@@ -1,0 +1,10 @@
+# Dependencies
+node_modules/
+
+# Package locks
+package-lock.json
+
+# Amplify generated files
+amplify_outputs.json
+.amplify/
+

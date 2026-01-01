@@ -1,0 +1,13 @@
+{
+  "name": "rd-bedrock-nova",
+  "version": "1.0.0",
+  "description": "Amazon Bedrock Nova シリーズ + Amplify Gen2 + Strands Agent",
+  "type": "module",
+  "scripts": {
+    "sandbox": "npx ampx sandbox",
+    "sandbox:delete": "npx ampx sandbox delete"
+  },
+  "dependencies": {
+    "@aws-amplify/backend-cli": "^1.8.1"
+  }
+}

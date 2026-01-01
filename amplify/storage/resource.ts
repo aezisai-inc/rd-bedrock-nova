@@ -18,10 +18,9 @@ export const storage = defineStorage({
     'processed/{entity_id}/*': [
       allow.entity('identity').to(['read']),
     ],
-    // 共有ファイル（管理者のみ書き込み可能）
+    // 共有ファイル（認証済みユーザーは読み取り可能）
     'shared/*': [
       allow.authenticated.to(['read']),
-      allow.groups(['admin']).to(['read', 'write', 'delete']),
     ],
   }),
 });
