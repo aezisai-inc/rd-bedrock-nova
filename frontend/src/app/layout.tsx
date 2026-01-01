@@ -1,33 +1,72 @@
-import type { Metadata } from 'next'
-import { Inter, JetBrains_Mono } from 'next/font/google'
-import './globals.css'
+'use client';
 
-const inter = Inter({
-  subsets: ['latin'],
-  variable: '--font-inter',
-})
+import './globals.css';
+import '@aws-amplify/ui-react/styles.css';
+import { Amplify } from 'aws-amplify';
+import { Authenticator } from '@aws-amplify/ui-react';
+import outputs from '../../amplify_outputs.json';
 
-const jetbrainsMono = JetBrains_Mono({
-  subsets: ['latin'],
-  variable: '--font-mono',
-})
-
-export const metadata: Metadata = {
-  title: 'Nova Platform - AI Agent Demo',
-  description: 'Amazon Bedrock Nova シリーズ + AG-UI Protocol による AI エージェントデモ',
-}
+// Amplify 設定
+Amplify.configure(outputs);
 
 export default function RootLayout({
   children,
 }: {
-  children: React.ReactNode
+  children: React.ReactNode;
 }) {
   return (
-    <html lang="ja" className={`${inter.variable} ${jetbrainsMono.variable}`}>
-      <body className="font-sans antialiased">{children}</body>
+    <html lang="ja">
+      <head>
+        <title>rd-bedrock-nova | Nova AI Platform</title>
+        <meta name="description" content="AWS Bedrock Nova シリーズを活用したAIプラットフォーム" />
+      </head>
+      <body className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
+        <Authenticator
+          signUpAttributes={['email']}
+          components={{
+            Header() {
+              return (
+                <div className="text-center py-8">
+                  <h1 className="text-3xl font-bold text-white mb-2">
+                    🚀 Nova AI Platform
+                  </h1>
+                  <p className="text-slate-300">
+                    AWS Bedrock Nova シリーズ検証環境
+                  </p>
+                </div>
+              );
+            },
+          }}
+        >
+          {({ signOut, user }) => (
+            <div className="min-h-screen">
+              {/* ヘッダー */}
+              <header className="bg-slate-800/50 backdrop-blur-sm border-b border-slate-700">
+                <div className="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">🚀</span>
+                    <span className="text-white font-semibold">Nova AI Platform</span>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <span className="text-slate-300 text-sm">
+                      {user?.signInDetails?.loginId}
+                    </span>
+                    <button
+                      onClick={signOut}
+                      className="px-3 py-1 text-sm bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition"
+                    >
+                      サインアウト
+                    </button>
+                  </div>
+                </div>
+              </header>
+
+              {/* メインコンテンツ */}
+              <main>{children}</main>
+            </div>
+          )}
+        </Authenticator>
+      </body>
     </html>
-  )
+  );
 }
-
-
-
