@@ -1,4 +1,4 @@
-import { defineFunction } from '@aws-amplify/backend';
+import { defineFunction, secret } from '@aws-amplify/backend';
 
 /**
  * AgentCore Lambda Function
@@ -16,7 +16,12 @@ export const agentFunction = defineFunction({
   environment: {
     BEDROCK_REGION: 'us-east-1',
     LOG_LEVEL: 'INFO',
+    // STORAGE_BUCKET_NAME は Amplify が自動的に設定
   },
   runtime: 20, // Node.js 20.x
+  bundling: {
+    // 依存関係をバンドル
+    externalModules: ['@aws-sdk/*'],
+  },
 });
 

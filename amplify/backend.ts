@@ -1,6 +1,7 @@
 import { defineBackend } from '@aws-amplify/backend';
 import { auth } from './auth/resource';
 import { data } from './data/resource';
+import { storage } from './storage/resource';
 import { agentFunction } from './functions/agent/resource';
 import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam';
 
@@ -8,13 +9,15 @@ import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam';
  * rd-bedrock-nova Backend Definition
  * 
  * Amplify Gen2 + Strands Agents + AgentCore 構成
- * - Auth: Cognito User Pool (Email + Google OAuth)
+ * - Auth: Cognito User Pool (Email + MFA)
  * - Data: AppSync GraphQL API with Subscriptions
- * - Functions: Lambda with AgentCore Runtime
+ * - Storage: S3 for file uploads
+ * - Functions: Lambda with AgentCore Runtime + Strands Agent
  */
 const backend = defineBackend({
   auth,
   data,
+  storage,
   agentFunction,
 });
 
