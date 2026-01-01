@@ -2,44 +2,74 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Amplify UI カスタマイズ */
 :root {
-  --foreground-rgb: 255, 255, 255;
-  --background-start-rgb: 9, 9, 11;
-  --background-end-rgb: 18, 18, 27;
+  --amplify-colors-brand-primary-10: #f5f3ff;
+  --amplify-colors-brand-primary-20: #ede9fe;
+  --amplify-colors-brand-primary-40: #c4b5fd;
+  --amplify-colors-brand-primary-60: #a78bfa;
+  --amplify-colors-brand-primary-80: #8b5cf6;
+  --amplify-colors-brand-primary-90: #7c3aed;
+  --amplify-colors-brand-primary-100: #6d28d9;
+  
+  --amplify-colors-background-primary: #1e293b;
+  --amplify-colors-background-secondary: #334155;
+  --amplify-colors-font-primary: #f1f5f9;
+  --amplify-colors-font-secondary: #94a3b8;
 }
 
-body {
-  color: rgb(var(--foreground-rgb));
-  background: linear-gradient(
-    to bottom,
-    rgb(var(--background-start-rgb)),
-    rgb(var(--background-end-rgb))
-  );
-  min-height: 100vh;
+/* 認証画面のダークテーマ */
+[data-amplify-authenticator] {
+  --amplify-components-authenticator-router-background-color: rgba(30, 41, 59, 0.8);
+  --amplify-components-authenticator-router-border-color: rgba(71, 85, 105, 0.5);
+  --amplify-components-authenticator-form-padding: 2rem;
+  
+  --amplify-components-button-primary-background-color: #7c3aed;
+  --amplify-components-button-primary-hover-background-color: #6d28d9;
+  
+  --amplify-components-fieldcontrol-border-color: rgba(71, 85, 105, 0.5);
+  --amplify-components-fieldcontrol-focus-border-color: #8b5cf6;
+  --amplify-components-fieldcontrol-color: #f1f5f9;
+  --amplify-components-fieldcontrol-background-color: rgba(30, 41, 59, 0.6);
+  
+  --amplify-components-tabs-item-color: #94a3b8;
+  --amplify-components-tabs-item-active-color: #f1f5f9;
+  --amplify-components-tabs-item-active-border-color: #8b5cf6;
 }
 
-/* CopilotKit Custom Styles */
-.copilot-chat-container {
-  @apply bg-surface-900 rounded-xl border border-surface-700;
+/* プロースカスタマイズ */
+.prose-invert {
+  --tw-prose-body: #e2e8f0;
+  --tw-prose-headings: #f8fafc;
+  --tw-prose-code: #e879f9;
+  --tw-prose-pre-bg: #1e293b;
 }
 
-/* Scrollbar Styling */
+/* スクロールバー */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  @apply bg-surface-900;
+  background: #1e293b;
 }
 
 ::-webkit-scrollbar-thumb {
-  @apply bg-surface-600 rounded-full;
+  background: #475569;
+  border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  @apply bg-surface-500;
+  background: #64748b;
 }
 
+/* アニメーション */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
 
-
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
