@@ -257,3 +257,46 @@ class ComputeStack(NestedStack):
                 retry_attempts=3,
             )
         )
+
+        # =================================================================
+        # Upload Handler Lambda (S3 Presigned URL Generation)
+        # =================================================================
+        # フロントエンドからのファイルアップロード用 presigned URL を生成
+
+        self.upload_fn = lambda_.Function(
+            self, 'UploadFn',
+            function_name='nova-upload-handler',
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler='handler.lambda_handler',
+            code=lambda_.Code.from_asset('src/handlers/upload'),
+            memory_size=256,
+            timeout=Duration.seconds(30),
+            environment={
+                'CONTENT_BUCKET': content_bucket.bucket_name,
+                'PRESIGNED_URL_EXPIRATION': '3600',
+                'MAX_FILE_SIZE_MB': '100',
+            },
+            log_retention=logs.RetentionDays.ONE_WEEK,
+        )
+
+        # S3 presigned URL 生成のための権限
+        content_bucket.grant_put(self.upload_fn)
+        content_bucket.grant_read(self.upload_fn)
+
+        # Lambda Function URL (フロントエンドから直接呼び出し)
+        self.upload_url = self.upload_fn.add_function_url(
+            auth_type=lambda_.FunctionUrlAuthType.NONE,
+            cors=lambda_.FunctionUrlCorsOptions(
+                allowed_origins=['*'],
+                allowed_methods=[lambda_.HttpMethod.GET, lambda_.HttpMethod.POST, lambda_.HttpMethod.OPTIONS],
+                allowed_headers=['Content-Type', 'Authorization'],
+            ),
+        )
+
+        # Upload Endpoint URL Output
+        CfnOutput(
+            self, 'UploadEndpointUrl',
+            value=self.upload_url.url,
+            description='File Upload Presigned URL Endpoint',
+            export_name='NovaUploadEndpointUrl',
+        )
