@@ -3,7 +3,10 @@
   "version": "2.0.0",
   "private": true,
   "scripts": {
+    "copy:amplify-config": "cp ../amplify_outputs.json ./amplify_outputs.json 2>/dev/null || echo 'amplify_outputs.json not found - run ampx sandbox first'",
+    "predev": "npm run copy:amplify-config",
     "dev": "next dev",
+    "prebuild": "npm run copy:amplify-config",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"
