@@ -1,6 +1,6 @@
 # rd-bedrock-nova アーキテクチャ設計書
 
-> **Amazon Bedrock Nova シリーズ + Strands Agent Core サーバレスアーキテクチャ**
+> **Amplify Gen2 + Strands Agent + Amazon Bedrock Nova シリーズ**
 
 ---
 
@@ -8,11 +8,12 @@
 
 1. [システム概要](#システム概要)
 2. [アーキテクチャ図](#アーキテクチャ図)
-3. [レイヤー構成](#レイヤー構成)
+3. [Amplify Gen2 構成](#amplify-gen2-構成)
 4. [コンポーネント詳細](#コンポーネント詳細)
 5. [データフロー](#データフロー)
-6. [コスト構成](#コスト構成)
-7. [技術スタック](#技術スタック)
+6. [セキュリティ設計](#セキュリティ設計)
+7. [コスト構成](#コスト構成)
+8. [デプロイメント](#デプロイメント)
 
 ---
 
@@ -22,8 +23,8 @@
 
 | 項目 | 内容 |
 |------|------|
-| **What** | Bedrock Nova Series + Strands Agent Core の統合検証 |
-| **Why** | OpenSearch代替（S3 Vectors）による90%コスト削減、サーバレスAgent実装 |
+| **What** | Bedrock Nova Series + Strands Agent の統合検証 |
+| **Why** | 本番環境に近い安定テスト環境、Amplify Gen2によるフルスタック統合 |
 | **Who** | AI/MLエンジニア、プラットフォームチーム |
 | **Goal** | 20-product への本番移行判断材料 |
 
@@ -31,11 +32,13 @@
 
 | 技術 | 用途 |
 |------|------|
+| **Amplify Gen2** | フルスタック TypeScript 開発基盤 |
+| **AppSync** | GraphQL API + Subscriptions |
+| **Cognito** | 認証・認可 (Email + MFA) |
 | **Nova Sonic** | 音声認識・話者識別・感情分析 |
-| **Nova Omni** | 映像理解・時系列分析・異常検知 |
+| **Nova Omni** | 映像理解・時系列分析 |
 | **Nova Embeddings** | マルチモーダル埋め込み生成 |
-| **S3 Vectors** | コスト効率ベクトル検索 (Preview) |
-| **Strands Agent Core** | Tool オーケストレーション・Memory管理 |
+| **Strands Agent** | Tool オーケストレーション |
 
 ---
 
@@ -43,295 +46,359 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│                                   FRONTEND LAYER                                         │
+│                               AMPLIFY GEN2 FULL-STACK                                    │
 │                                                                                          │
-│  ┌──────────────┐   ┌─────────────────────┐   ┌──────────────┐   ┌──────────────────┐  │
-│  │  Next.js 15  │   │  /copilot/          │   │  /settings/  │   │  S3 + CloudFront │  │
-│  │  (Static)    │──▶│  CopilotKit Chat    │◀──│  Lambda URL  │   │  (Hosting)       │  │
-│  └──────────────┘   └──────────┬──────────┘   └──────────────┘   └──────────────────┘  │
-│                                │                                                         │
-└────────────────────────────────┼─────────────────────────────────────────────────────────┘
-                                 │ AG-UI Protocol (SSE Streaming)
-                                 ▼
-┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│                              COMPUTE LAYER (AWS Lambda)                                  │
-│                                                                                          │
-│  ┌─────────────────────────────────────────────────────────────────────────────────┐    │
-│  │                         AG-UI Handler (Function URL)                             │    │
-│  │                         nova-ag-ui-handler | 1024MB | 300s                       │    │
-│  │                         Response Streaming Enabled                                │    │
-│  └──────────────────────────────────┬──────────────────────────────────────────────┘    │
-│                                     │                                                    │
-│                                     ▼                                                    │
-│  ┌─────────────────────────────────────────────────────────────────────────────────┐    │
-│  │                     Agent Core (Container Image from ECR)                        │    │
-│  │                     nova-agent-core | Strands SDK | 1024MB | 300s               │    │
-│  │                                                                                  │    │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐    │    │
-│  │  │ Tool:       │  │ Tool:       │  │ Tool:       │  │ Memory:             │    │    │
-│  │  │ Audio       │  │ Video       │  │ Search      │  │ DynamoDB Session    │    │    │
-│  │  │ (Nova Sonic)│  │ (Nova Omni) │  │ (Embeddings)│  │ (TTL-based)         │    │    │
-│  │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────────────┘    │    │
-│  └─────────────────────────────────────────────────────────────────────────────────┘    │
-│                                                                                          │
-│  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐  ┌────────────────────┐    │
-│  │ Audio Handler  │  │ Video Handler  │  │ Search Handler │  │ Event Projector    │    │
-│  │ nova-audio-*   │  │ nova-video-*   │  │ nova-search-*  │  │ nova-event-proj    │    │
-│  │ 256MB / 300s   │  │ 512MB / 300s   │  │ 256MB / 60s    │  │ 256MB / 60s        │    │
-│  │                │  │                │  │                │  │                    │    │
-│  │ Nova Sonic     │  │ Nova Omni      │  │ Nova Embeddings│  │ DynamoDB Stream    │    │
-│  │ 音声処理       │  │ 映像処理       │  │ S3 Vectors     │  │ → Read Model       │    │
-│  └────────────────┘  └────────────────┘  └────────────────┘  └────────────────────┘    │
-│                                                                                          │
-│  ┌────────────────────────────────────┐  ┌─────────────────────────────────────────┐   │
-│  │ API Gateway (REST)                 │  │ ECR (Container Registry)                │   │
-│  │ /agent /audio /video /search       │  │ nova-agent-core:latest                  │   │
-│  │ Rate: 1000/s | Burst: 500          │  │                                         │   │
-│  └────────────────────────────────────┘  └─────────────────────────────────────────┘   │
-│                                                                                          │
-└─────────────────────────────────────────────────────────────────────────────────────────┘
-                                         │
-                                         ▼
-┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│                                    DATA LAYER                                            │
-│                                                                                          │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐  ┌────────────────┐  │
-│  │ DynamoDB         │  │ DynamoDB         │  │ DynamoDB         │  │ S3 Bucket      │  │
-│  │ Event Store      │  │ Read Model       │  │ Session Memory   │  │                │  │
-│  │                  │  │                  │  │                  │  │ • Audio        │  │
-│  │ • pk/sk + GSI    │  │ • CQRS Query     │  │ • TTL: ON        │  │ • Video        │  │
-│  │ • Stream: ON     │  │ • On-Demand      │  │ • Redis代替      │  │ • Images       │  │
-│  │ • Event Sourcing │  │                  │  │ • On-Demand      │  │ • Documents    │  │
-│  └──────────────────┘  └──────────────────┘  └──────────────────┘  └────────────────┘  │
-│                                                                                          │
-│  ┌──────────────────────────────────────────┐  ┌─────────────────────────────────────┐  │
-│  │ S3 Vectors (Preview 2025.07~)            │  │ CloudWatch                          │  │
-│  │                                          │  │                                     │  │
-│  │ • OpenSearch 代替 (90% コスト削減)       │  │ • Logs                              │  │
-│  │ • ペタバイト規模対応                     │  │ • Metrics                           │  │
-│  │ • kNN 類似検索                           │  │ • Alarms                            │  │
-│  └──────────────────────────────────────────┘  └─────────────────────────────────────┘  │
-│                                                                                          │
-└─────────────────────────────────────────────────────────────────────────────────────────┘
-                                         │
-                                         ▼
-┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│                              AWS BEDROCK (AI/ML Models)                                  │
-│                                                                                          │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌────────────────────────┐                 │
-│  │ Nova Sonic       │  │ Nova Omni        │  │ Nova Multimodal        │                 │
-│  │                  │  │                  │  │ Embeddings             │                 │
-│  │ • 音声認識       │  │ • 映像理解       │  │                        │                 │
-│  │ • 話者識別       │  │ • 時系列分析     │  │ • マルチモーダル       │                 │
-│  │ • 感情分析       │  │ • 異常検知       │  │   埋め込み生成         │                 │
-│  │ • リアルタイム   │  │ • フレーム解析   │  │ • 統一ベクトル空間     │                 │
-│  └──────────────────┘  └──────────────────┘  └────────────────────────┘                 │
-│                                                                                          │
-│  ┌──────────────────────────────────┐  ┌─────────────────────────────────────────────┐  │
-│  │ Claude 3.5 Sonnet                │  │ Bedrock Guardrails                          │  │
-│  │ (Foundation Model)               │  │                                             │  │
-│  │                                  │  │ • Content Filtering                         │  │
-│  │ • Agent Orchestration            │  │ • PII Detection                             │  │
-│  │ • Tool Selection                 │  │ • Topic Restrictions                        │  │
-│  │ • Response Generation            │  │ • Safety Controls                           │  │
-│  └──────────────────────────────────┘  └─────────────────────────────────────────────┘  │
+│  ┌──────────────────────────────────────────────────────────────────────────────────┐   │
+│  │                           FRONTEND LAYER (Next.js 14)                             │   │
+│  │                                                                                   │   │
+│  │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐                   │   │
+│  │  │  Amplify UI     │  │  Data Client    │  │  Storage Client │                   │   │
+│  │  │  Authenticator  │  │  (GraphQL)      │  │  (S3 Upload)    │                   │   │
+│  │  │                 │  │                 │  │                 │                   │   │
+│  │  │  • Login/Signup │  │  • Mutations    │  │  • uploadData   │                   │   │
+│  │  │  • MFA          │  │  • Queries      │  │  • getUrl       │                   │   │
+│  │  │  • Dark Theme   │  │  • Subscriptions│  │  • Presigned    │                   │   │
+│  │  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘                   │   │
+│  │           │                    │                    │                             │   │
+│  └───────────┼────────────────────┼────────────────────┼─────────────────────────────┘   │
+│              │                    │                    │                                  │
+│              ▼                    ▼                    ▼                                  │
+│  ┌──────────────────────────────────────────────────────────────────────────────────┐   │
+│  │                           AMPLIFY BACKEND LAYER                                   │   │
+│  │                                                                                   │   │
+│  │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────────────┐   │   │
+│  │  │    Cognito      │  │    AppSync      │  │           Lambda                │   │   │
+│  │  │   User Pool     │  │   (GraphQL)     │  │       (Agent Handler)           │   │   │
+│  │  │                 │  │                 │  │                                 │   │   │
+│  │  │  • Email Auth   │  │  • ChatMessage  │  │  ┌─────────────────────────┐   │   │   │
+│  │  │  • MFA (TOTP)   │  │  • ChatSession  │  │  │   Strands Agent         │   │   │   │
+│  │  │  • JWT Tokens   │  │  • UploadedFile │  │  │                         │   │   │   │
+│  │  │  • Password     │  │                 │  │  │  • invokeAgent()        │   │   │   │
+│  │  │    Policy       │  │  Mutations:     │  │  │  • Tool Orchestration   │   │   │   │
+│  │  │                 │  │  • invokeAgent  │  │  │  • Nova Pro Model       │   │   │   │
+│  │  │                 │  │  Queries:       │  │  │                         │   │   │   │
+│  │  │                 │  │  • getUploadUrl │  │  └─────────────────────────┘   │   │   │
+│  │  └─────────────────┘  └────────┬────────┘  └─────────────────────────────────┘   │   │
+│  │                                │                           │                      │   │
+│  │  ┌─────────────────────────────┼───────────────────────────┼──────────────────┐   │   │
+│  │  │                      S3 Storage Bucket                                      │   │   │
+│  │  │                                                                             │   │   │
+│  │  │  uploads/{user_id}/      processed/{user_id}/      shared/                  │   │   │
+│  │  │  ├── images/             ├── transcripts/          ├── templates/           │   │   │
+│  │  │  ├── audio/              ├── analysis/             └── assets/              │   │   │
+│  │  │  └── video/              └── embeddings/                                    │   │   │
+│  │  └─────────────────────────────────────────────────────────────────────────────┘   │   │
+│  └──────────────────────────────────────────────────────────────────────────────────┘   │
+│                                          │                                               │
+│                                          ▼                                               │
+│  ┌──────────────────────────────────────────────────────────────────────────────────┐   │
+│  │                        AWS BEDROCK (AI/ML Models)                                 │   │
+│  │                                                                                   │   │
+│  │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐                   │   │
+│  │  │   Nova Pro      │  │   Nova Sonic    │  │   Nova Omni     │                   │   │
+│  │  │   (LLM)         │  │   (Speech)      │  │   (Vision)      │                   │   │
+│  │  │                 │  │                 │  │                 │                   │   │
+│  │  │  • Chat         │  │  • 音声認識     │  │  • 画像解析     │                   │   │
+│  │  │  • Reasoning    │  │  • 話者識別     │  │  • 動画要約     │                   │   │
+│  │  │  • Tool Use     │  │  • 感情分析     │  │  • OCR          │                   │   │
+│  │  └─────────────────┘  └─────────────────┘  └─────────────────┘                   │   │
+│  │                                                                                   │   │
+│  │  ┌─────────────────────────────────────┐  ┌────────────────────────────────────┐ │   │
+│  │  │   Nova Multimodal Embeddings        │  │   Bedrock Guardrails               │ │   │
+│  │  │                                     │  │                                    │ │   │
+│  │  │  • テキスト埋め込み                 │  │  • Content Filtering               │ │   │
+│  │  │  • 画像埋め込み                     │  │  • PII Detection                   │ │   │
+│  │  │  • 統一ベクトル空間                 │  │  • Safety Controls                 │ │   │
+│  │  └─────────────────────────────────────┘  └────────────────────────────────────┘ │   │
+│  └──────────────────────────────────────────────────────────────────────────────────┘   │
 │                                                                                          │
 └─────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## レイヤー構成
+## Amplify Gen2 構成
 
-### 1. Frontend Layer
+### バックエンド定義 (`amplify/backend.ts`)
 
-| コンポーネント | 技術 | 説明 |
-|----------------|------|------|
-| **Framework** | Next.js 15 | Static Export (S3ホスティング対応) |
-| **UI** | CopilotKit | AI チャット UI コンポーネント |
-| **Protocol** | AG-UI | リアルタイムストリーミング (SSE) |
-| **Hosting** | S3 + CloudFront | CDN配信 |
+```typescript
+const backend = defineBackend({
+  auth,      // Cognito User Pool
+  data,      // AppSync GraphQL API
+  storage,   // S3 Bucket
+  agentFunction,  // Lambda (Strands Agent)
+});
 
-### 2. Compute Layer
+// IAM Policy: Bedrock InvokeModel
+backend.agentFunction.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],
+    resources: ['arn:aws:bedrock:*::foundation-model/amazon.nova-*'],
+  })
+);
+```
 
-| Lambda Function | Memory | Timeout | 用途 |
-|-----------------|--------|---------|------|
-| `nova-ag-ui-handler` | 1024MB | 300s | AG-UI Protocol + SSE |
-| `nova-agent-core` | 1024MB | 300s | Strands Agent オーケストレーション |
-| `nova-audio-handler` | 256MB | 300s | Nova Sonic 音声処理 |
-| `nova-video-handler` | 512MB | 300s | Nova Omni 映像処理 |
-| `nova-search-handler` | 256MB | 60s | Embeddings + S3 Vectors |
-| `nova-event-projector` | 256MB | 60s | CQRS Read Model 更新 |
+### 認証設定 (`amplify/auth/resource.ts`)
 
-### 3. Data Layer
+| 設定項目 | 値 |
+|----------|-----|
+| 認証方式 | Email |
+| MFA | TOTP (Optional) |
+| パスワード | 8文字以上、大小英字+数字 |
+| 確認コード | メール送信 |
+| アカウント復旧 | Email Only |
 
-| リソース | 種類 | 用途 |
-|----------|------|------|
-| **Event Store** | DynamoDB | Event Sourcing (Stream有効) |
-| **Read Model** | DynamoDB | CQRS Query用 |
-| **Session Memory** | DynamoDB | Agent短期メモリ (TTL) |
-| **Content Bucket** | S3 | メディアファイル保存 |
-| **S3 Vectors** | S3 | ベクトル検索 (Preview) |
+### GraphQL スキーマ (`amplify/data/resource.ts`)
 
-### 4. AI/ML Layer
+```graphql
+# モデル
+type ChatMessage @model @auth(rules: [{allow: owner}]) {
+  sessionId: String!
+  role: Role!  # user | assistant | system
+  content: String!
+  timestamp: AWSDateTime
+  metadata: AWSJSON
+}
 
-| モデル | 用途 |
-|--------|------|
-| **Nova Sonic** | 音声認識・話者識別・感情分析 |
-| **Nova Omni** | 映像理解・時系列分析・異常検知 |
-| **Nova Embeddings** | マルチモーダル埋め込み |
-| **Claude 3.5 Sonnet** | Agent オーケストレーション |
-| **Guardrails** | コンテンツフィルタリング |
+type ChatSession @model @auth(rules: [{allow: owner}]) {
+  title: String
+  lastMessageAt: AWSDateTime
+  messageCount: Int
+  status: SessionStatus  # active | archived
+}
+
+type UploadedFile @model @auth(rules: [{allow: owner}]) {
+  sessionId: String!
+  fileName: String!
+  fileType: String!
+  s3Key: String!
+  size: Int
+  uploadedAt: AWSDateTime
+}
+
+# カスタム操作
+type Mutation {
+  invokeAgent(sessionId: String!, message: String!, fileKeys: [String]): String
+    @function(name: "agent-handler")
+}
+
+type Query {
+  getUploadUrl(fileName: String!, fileType: String!): UploadUrlResult
+    @function(name: "agent-handler")
+}
+```
+
+### Storage 設定 (`amplify/storage/resource.ts`)
+
+| パス | アクセス権限 |
+|------|-------------|
+| `uploads/{entity_id}/*` | Owner: read, write, delete |
+| `processed/{entity_id}/*` | Owner: read |
+| `shared/*` | Authenticated: read |
 
 ---
 
 ## コンポーネント詳細
 
-### AG-UI Protocol Handler
+### Lambda Agent Handler
 
-```python
-# src/handlers/agent/ag_ui_handler.py
+```typescript
+// amplify/functions/agent/handler.ts
 
-AG-UI Events:
-├── RUN_STARTED      # エージェント実行開始
-├── TEXT_MESSAGE_START / CONTENT / END  # メッセージストリーミング
-├── TOOL_CALL_START / ARGS / END        # ツール呼び出し
-├── RUN_FINISHED     # 実行完了
-└── RUN_ERROR        # エラー
+export const handler: AppSyncResolverHandler<any, any> = async (event) => {
+  const { fieldName } = event.info;
+  const userId = event.identity?.sub;
+
+  switch (fieldName) {
+    case 'invokeAgent':
+      return handleInvokeAgent(event.arguments, userId);
+    case 'getUploadUrl':
+      return handleGetUploadUrl(event.arguments, userId);
+  }
+};
 ```
 
-### Strands Agent Core
+### Strands Agent 統合
 
-```python
-# src/agent/coordinator.py
+```typescript
+// amplify/functions/agent/strands-agent.ts
 
-NovaCoordinatorAgent:
-├── Tools:
-│   ├── audio_tool     → Nova Sonic API
-│   ├── video_tool     → Nova Omni API
-│   └── search_tool    → Nova Embeddings + S3 Vectors
-├── Memory:
-│   └── DynamoDBMemory (Session TTL)
-└── Guardrails:
-    └── Bedrock Guardrails
-```
+const TOOLS = [
+  { name: 'analyze_image', description: '画像を分析' },
+  { name: 'transcribe_audio', description: '音声を文字起こし' },
+  { name: 'analyze_video', description: '動画を分析' },
+  { name: 'generate_embeddings', description: 'ベクトル埋め込み生成' },
+];
 
-### Gateway Pattern
-
-```
-src/infrastructure/gateways/
-├── bedrock/
-│   ├── nova_sonic_gateway.py      # 192行
-│   ├── nova_omni_gateway.py       # 386行
-│   └── nova_embeddings_gateway.py # 379行
-└── s3/
-    ├── s3_gateway.py              # 173行
-    └── s3_vectors_gateway.py      # 481行
+export async function invokeAgent(params: {
+  sessionId: string;
+  message: string;
+  fileKeys?: string[];
+}): Promise<string> {
+  // Nova Pro でツール選択・実行
+  const response = await bedrockClient.send(
+    new InvokeModelCommand({
+      modelId: 'amazon.nova-pro-v1:0',
+      body: JSON.stringify({
+        system: [{ text: systemPrompt }],
+        messages,
+        toolConfig: { tools: TOOLS },
+      }),
+    })
+  );
+  return parseResponse(response);
+}
 ```
 
 ---
 
 ## データフロー
 
-### 1. チャット会話フロー
+### 1. 認証フロー
 
 ```
-User → CopilotKit → AG-UI Handler → Agent Core → Tool Lambda → Bedrock Model
-                  ↑                                                    │
-                  └──────────────── SSE Streaming ─────────────────────┘
+User → Amplify Authenticator → Cognito User Pool → JWT Token → AppSync
 ```
 
-### 2. イベントソーシングフロー
+### 2. チャットフロー
 
 ```
-Command → Agent Core → Event Store (DynamoDB)
-                              │
-                              ▼ (DynamoDB Stream)
-                       Event Projector → Read Model
+User Input → Data Client → AppSync Mutation (invokeAgent)
+                                    │
+                                    ▼
+                           Lambda (Agent Handler)
+                                    │
+                                    ▼
+                           Strands Agent → Bedrock Nova Pro
+                                    │
+                                    ▼
+                           Tool Execution (Audio/Video/Search)
+                                    │
+                                    ▼
+                           Response → User
 ```
 
-### 3. ベクトル検索フロー
+### 3. ファイルアップロードフロー
 
 ```
-Query → Search Handler → Nova Embeddings → S3 Vectors → Results
+User → Storage Client (uploadData) → S3 Bucket (uploads/{user_id}/)
+                                           │
+                                           ▼
+                                  s3Key を Message に含める
+                                           │
+                                           ▼
+                                  Agent がファイルを読み込んで処理
+```
+
+---
+
+## セキュリティ設計
+
+### 認証・認可
+
+| レイヤー | 方式 |
+|----------|------|
+| **Frontend** | Amplify Authenticator (Cognito) |
+| **API** | AppSync + Cognito JWT |
+| **Storage** | Owner-based Access Control |
+| **Lambda** | IAM Role (最小権限) |
+
+### IAM ポリシー
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream"
+      ],
+      "Resource": [
+        "arn:aws:bedrock:*::foundation-model/amazon.nova-*",
+        "arn:aws:bedrock:*::foundation-model/anthropic.claude-*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject"],
+      "Resource": "arn:aws:s3:::amplify-*-storage/*"
+    }
+  ]
+}
 ```
 
 ---
 
 ## コスト構成
 
-### アイドル時 (リクエストなし)
+### サンドボックス環境 (開発時)
 
 | リソース | 月額コスト |
 |----------|-----------|
-| Lambda | $0 |
-| DynamoDB (On-Demand) | $0 |
-| S3 | ~$0.02 |
-| API Gateway | $0 |
-| **合計** | **~$0/月** |
-
-### 軽負荷時 (1,000リクエスト/日)
-
-| リソース | 月額コスト |
-|----------|-----------|
-| Lambda | ~$2 |
-| DynamoDB | ~$1 |
+| Cognito | 無料 (50,000 MAU まで) |
+| AppSync | ~$4/月 (100万リクエスト) |
+| Lambda | ~$0 (無料枠内) |
 | S3 | ~$0.50 |
-| Bedrock (API) | ~$5 |
-| **合計** | **~$10/月** |
+| Bedrock | 使用量課金 |
+| **合計** | **~$5/月** |
 
-### コスト比較
+### 本番環境 (軽負荷)
+
+| リソース | 月額コスト |
+|----------|-----------|
+| Cognito | 無料 |
+| AppSync | ~$10/月 |
+| Lambda | ~$5/月 |
+| S3 | ~$2/月 |
+| Bedrock | ~$20/月 |
+| Amplify Hosting | ~$5/月 |
+| **合計** | **~$40/月** |
+
+### ECS構成との比較
 
 | 構成 | アイドル時 | 軽負荷 |
 |------|-----------|--------|
 | **ECS Fargate** | ~$50/月 | ~$100/月 |
-| **Lambda (本構成)** | ~$0/月 | ~$10/月 |
-| **OpenSearch Serverless** | ~$100/月 | ~$150/月 |
-| **S3 Vectors** | ~$0/月 | ~$10/月 |
+| **Amplify Gen2 (本構成)** | ~$5/月 | ~$40/月 |
 
 ---
 
-## 技術スタック
+## デプロイメント
 
-### Backend
+### サンドボックス (開発)
 
-| カテゴリ | 技術 |
-|----------|------|
-| 言語 | Python 3.12 |
-| Agent Framework | Strands SDK |
-| API | FastAPI (ローカル) / Lambda Handler |
-| Event Store | DynamoDB + Streams |
-| Vector Search | S3 Vectors (Preview) |
+```bash
+cd amplify
+npm install
+npx ampx sandbox
+```
 
-### Frontend
+### 本番 (Git Push)
 
-| カテゴリ | 技術 |
-|----------|------|
-| Framework | Next.js 15 |
-| UI | CopilotKit |
-| Protocol | AG-UI (SSE) |
-| Styling | Tailwind CSS |
+```bash
+git push origin main
+# → Amplify Hosting で自動デプロイ
+```
 
-### Infrastructure
+### 手動デプロイ
 
-| カテゴリ | 技術 |
-|----------|------|
-| IaC | AWS CDK (Python) |
-| Compute | Lambda (Container Image) |
-| API | API Gateway + Function URL |
-| Storage | DynamoDB, S3 |
-| AI/ML | Amazon Bedrock |
+```bash
+npx ampx pipeline-deploy --branch main --app-id $APP_ID
+```
 
 ---
 
 ## 関連ドキュメント
 
 - [README.md](../README.md) - プロジェクト概要
+- [AMPLIFY_SANDBOX_GUIDE.md](./AMPLIFY_SANDBOX_GUIDE.md) - サンドボックスガイド
+- [E2E_TESTING.md](./E2E_TESTING.md) - E2Eテストガイド
+- [DEPLOY.md](../DEPLOY.md) - デプロイガイド
 - [TASKS.csv](./TASKS.csv) - タスク管理
-- [cost-analysis.md](./cost-analysis.md) - コスト分析詳細
-- [performance-baseline.md](./performance-baseline.md) - パフォーマンス計測
 
 ---
 
 *Last Updated: 2025-01-01*
-
+*Architecture: Amplify Gen2 + Strands Agent + Bedrock Nova*

@@ -1,123 +1,141 @@
-<mxfile host="app.diagrams.net" modified="2025-01-01T00:00:00.000Z" agent="Mozilla/5.0" etag="nova-arch-v3" version="24.7.17" type="device">
-  <diagram name="Nova Platform Architecture" id="nova-arch-v3">
-    <mxGraphModel dx="1434" dy="780" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1200" math="0" shadow="0">
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" agent="Mozilla/5.0" version="24.7.17" etag="amplify-gen2-v1">
+  <diagram name="Amplify Gen2 Architecture" id="amplify-gen2-arch">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1200" math="0" shadow="0">
       <root>
-        <mxCell id="0" />
-        <mxCell id="1" parent="0" />
-        <mxCell id="title" value="rd-bedrock-nova Architecture (Serverless)" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=24;fontStyle=1;fontColor=#232F3E;" vertex="1" parent="1">
-          <mxGeometry x="600" y="20" width="400" height="40" as="geometry" />
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <!-- Title -->
+        <mxCell id="title" value="rd-bedrock-nova: Amplify Gen2 + Strands Agent Architecture" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=20;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="400" y="20" width="600" height="40" as="geometry"/>
         </mxCell>
-        <mxCell id="frontend-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F4F8;strokeColor=#147EBA;strokeWidth=2;" vertex="1" parent="1">
-          <mxGeometry x="100" y="80" width="1400" height="160" as="geometry" />
+
+        <!-- Frontend Layer -->
+        <mxCell id="frontend-group" value="FRONTEND LAYER (Next.js 14 + Amplify UI)" style="swimlane;fontStyle=1;childLayout=stackLayout;horizontal=1;startSize=30;fillColor=#dae8fc;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=0;marginBottom=0;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="200" y="80" width="1000" height="180" as="geometry"/>
         </mxCell>
-        <mxCell id="frontend-label" value="FRONTEND LAYER" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontStyle=1;fontColor=#147EBA;" vertex="1" parent="1">
-          <mxGeometry x="120" y="90" width="200" height="20" as="geometry" />
+
+        <!-- Authenticator -->
+        <mxCell id="authenticator" value="Amplify Authenticator&#xa;(Cognito UI)&#xa;&#xa;• Login/Signup&#xa;• MFA (TOTP)&#xa;• Dark Theme" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="230" y="120" width="180" height="120" as="geometry"/>
         </mxCell>
-        <mxCell id="nextjs" value="Next.js 15&#xa;(Static Export)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#232F3E;strokeWidth=2;" vertex="1" parent="1">
-          <mxGeometry x="150" y="120" width="120" height="60" as="geometry" />
+
+        <!-- Data Client -->
+        <mxCell id="data-client" value="Data Client&#xa;(GraphQL)&#xa;&#xa;• invokeAgent mutation&#xa;• getUploadUrl query&#xa;• ChatMessage model" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="440" y="120" width="180" height="120" as="geometry"/>
         </mxCell>
-        <mxCell id="landing" value="/ Landing" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFAFA;strokeColor=#545B64;" vertex="1" parent="1">
-          <mxGeometry x="320" y="120" width="100" height="40" as="geometry" />
+
+        <!-- Storage Client -->
+        <mxCell id="storage-client" value="Storage Client&#xa;(S3)&#xa;&#xa;• uploadData()&#xa;• getUrl()&#xa;• Presigned URL" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="650" y="120" width="180" height="120" as="geometry"/>
         </mxCell>
-        <mxCell id="copilot" value="/copilot/&#xa;CopilotKit Chat" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FF9900;strokeColor=#232F3E;fontColor=#FFFFFF;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="460" y="110" width="140" height="60" as="geometry" />
+
+        <!-- Chat UI -->
+        <mxCell id="chat-ui" value="Chat UI&#xa;&#xa;• MessageBubble&#xa;• FileUpload&#xa;• ReactMarkdown" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="860" y="120" width="180" height="120" as="geometry"/>
         </mxCell>
-        <mxCell id="settings" value="/settings/&#xa;Lambda URL設定" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFAFA;strokeColor=#545B64;" vertex="1" parent="1">
-          <mxGeometry x="640" y="120" width="120" height="40" as="geometry" />
+
+        <!-- Amplify Backend Layer -->
+        <mxCell id="backend-group" value="AMPLIFY BACKEND LAYER" style="swimlane;fontStyle=1;childLayout=stackLayout;horizontal=1;startSize=30;fillColor=#ffe6cc;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=0;marginBottom=0;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="200" y="300" width="1000" height="250" as="geometry"/>
         </mxCell>
-        <mxCell id="s3-static" value="S3 + CloudFront&#xa;(Static Hosting)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#3F8624;strokeColor=#232F3E;fontColor=#FFFFFF;" vertex="1" parent="1">
-          <mxGeometry x="1280" y="120" width="140" height="60" as="geometry" />
+
+        <!-- Cognito -->
+        <mxCell id="cognito" value="Cognito&#xa;User Pool&#xa;&#xa;• Email Auth&#xa;• Password Policy&#xa;• JWT Tokens" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="230" y="340" width="150" height="120" as="geometry"/>
         </mxCell>
-        <mxCell id="agui-arrow" value="AG-UI Protocol&#xa;(SSE Streaming)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9900;strokeWidth=3;fontColor=#FF9900;fontStyle=1;" edge="1" parent="1" source="copilot" target="agui-handler">
-          <mxGeometry relative="1" as="geometry" />
+
+        <!-- AppSync -->
+        <mxCell id="appsync" value="AppSync&#xa;(GraphQL API)&#xa;&#xa;Models:&#xa;• ChatMessage&#xa;• ChatSession&#xa;• UploadedFile" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="410" y="340" width="170" height="120" as="geometry"/>
         </mxCell>
-        <mxCell id="compute-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF4E5;strokeColor=#FF9900;strokeWidth=2;" vertex="1" parent="1">
-          <mxGeometry x="100" y="280" width="1400" height="280" as="geometry" />
+
+        <!-- Lambda -->
+        <mxCell id="lambda" value="Lambda&#xa;(Agent Handler)&#xa;&#xa;• Strands Agent&#xa;• invokeAgent()&#xa;• getUploadUrl()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="610" y="340" width="170" height="120" as="geometry"/>
         </mxCell>
-        <mxCell id="compute-label" value="COMPUTE LAYER (AWS Lambda)" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontStyle=1;fontColor=#FF9900;" vertex="1" parent="1">
-          <mxGeometry x="120" y="290" width="300" height="20" as="geometry" />
+
+        <!-- S3 Storage -->
+        <mxCell id="s3-storage" value="S3 Storage&#xa;&#xa;uploads/{user}/&#xa;├── images/&#xa;├── audio/&#xa;└── video/" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="810" y="340" width="160" height="120" as="geometry"/>
         </mxCell>
-        <mxCell id="agui-handler" value="AG-UI Handler&#xa;(Function URL)&#xa;&#xa;nova-ag-ui-handler&#xa;1024MB / 300s" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FF9900;strokeColor=#232F3E;fontColor=#FFFFFF;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="420" y="320" width="180" height="100" as="geometry" />
+
+        <!-- CloudWatch -->
+        <mxCell id="cloudwatch" value="CloudWatch&#xa;&#xa;• Logs&#xa;• Metrics&#xa;• Alarms" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="1000" y="340" width="120" height="120" as="geometry"/>
         </mxCell>
-        <mxCell id="agent-core" value="Agent Core&#xa;(Container Image)&#xa;&#xa;Strands SDK&#xa;nova-agent-core&#xa;1024MB / 300s" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#232F3E;strokeColor=#FF9900;fontColor=#FFFFFF;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="680" y="320" width="180" height="100" as="geometry" />
+
+        <!-- Strands Agent Box -->
+        <mxCell id="strands-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;strokeWidth=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="230" y="480" width="540" height="60" as="geometry"/>
         </mxCell>
-        <mxCell id="audio-fn" value="Audio Handler&#xa;Nova Sonic&#xa;256MB / 300s" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#C925D1;strokeColor=#232F3E;fontColor=#FFFFFF;" vertex="1" parent="1">
-          <mxGeometry x="200" y="460" width="140" height="80" as="geometry" />
+
+        <mxCell id="strands-label" value="Strands Agent SDK: Tool Orchestration (analyze_image, transcribe_audio, analyze_video, generate_embeddings)" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="230" y="490" width="540" height="40" as="geometry"/>
         </mxCell>
-        <mxCell id="video-fn" value="Video Handler&#xa;Nova Omni&#xa;512MB / 300s" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#C925D1;strokeColor=#232F3E;fontColor=#FFFFFF;" vertex="1" parent="1">
-          <mxGeometry x="380" y="460" width="140" height="80" as="geometry" />
+
+        <!-- Bedrock Layer -->
+        <mxCell id="bedrock-group" value="AWS BEDROCK (AI/ML Models)" style="swimlane;fontStyle=1;childLayout=stackLayout;horizontal=1;startSize=30;fillColor=#f5f5f5;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=0;marginBottom=0;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="200" y="600" width="1000" height="180" as="geometry"/>
         </mxCell>
-        <mxCell id="search-fn" value="Search Handler&#xa;Nova Embeddings&#xa;+ S3 Vectors&#xa;256MB / 60s" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#C925D1;strokeColor=#232F3E;fontColor=#FFFFFF;" vertex="1" parent="1">
-          <mxGeometry x="560" y="460" width="140" height="80" as="geometry" />
+
+        <!-- Nova Pro -->
+        <mxCell id="nova-pro" value="Nova Pro&#xa;(LLM)&#xa;&#xa;• Chat&#xa;• Reasoning&#xa;• Tool Use" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffcc99;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="230" y="640" width="140" height="120" as="geometry"/>
         </mxCell>
-        <mxCell id="projector-fn" value="Event Projector&#xa;DynamoDB Stream&#xa;Read Model&#xa;256MB / 60s" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#3334B9;strokeColor=#232F3E;fontColor=#FFFFFF;" vertex="1" parent="1">
-          <mxGeometry x="740" y="460" width="140" height="80" as="geometry" />
+
+        <!-- Nova Sonic -->
+        <mxCell id="nova-sonic" value="Nova Sonic&#xa;(Speech)&#xa;&#xa;• 音声認識&#xa;• 話者識別&#xa;• 感情分析" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#99ccff;strokeColor=#6699cc;" vertex="1" parent="1">
+          <mxGeometry x="400" y="640" width="140" height="120" as="geometry"/>
         </mxCell>
-        <mxCell id="ecr" value="ECR&#xa;Container Registry" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ED7100;strokeColor=#232F3E;fontColor=#FFFFFF;" vertex="1" parent="1">
-          <mxGeometry x="1280" y="340" width="140" height="60" as="geometry" />
+
+        <!-- Nova Omni -->
+        <mxCell id="nova-omni" value="Nova Omni&#xa;(Vision)&#xa;&#xa;• 画像解析&#xa;• 動画要約&#xa;• OCR" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cc99ff;strokeColor=#9966cc;" vertex="1" parent="1">
+          <mxGeometry x="570" y="640" width="140" height="120" as="geometry"/>
         </mxCell>
-        <mxCell id="apigw" value="API Gateway&#xa;(REST API)&#xa;&#xa;/agent /audio&#xa;/video /search" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E7157B;strokeColor=#232F3E;fontColor=#FFFFFF;" vertex="1" parent="1">
-          <mxGeometry x="1000" y="320" width="160" height="100" as="geometry" />
+
+        <!-- Nova Embeddings -->
+        <mxCell id="nova-embeddings" value="Nova&#xa;Embeddings&#xa;&#xa;• テキスト&#xa;• 画像&#xa;• 1024次元" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#99ff99;strokeColor=#66cc66;" vertex="1" parent="1">
+          <mxGeometry x="740" y="640" width="140" height="120" as="geometry"/>
         </mxCell>
-        <mxCell id="data-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#3F8624;strokeWidth=2;" vertex="1" parent="1">
-          <mxGeometry x="100" y="600" width="1400" height="180" as="geometry" />
+
+        <!-- Guardrails -->
+        <mxCell id="guardrails" value="Bedrock&#xa;Guardrails&#xa;&#xa;• Content Filter&#xa;• PII Detection&#xa;• Safety" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ff9999;strokeColor=#cc6666;" vertex="1" parent="1">
+          <mxGeometry x="910" y="640" width="140" height="120" as="geometry"/>
         </mxCell>
-        <mxCell id="data-label" value="DATA LAYER (Serverless)" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontStyle=1;fontColor=#3F8624;" vertex="1" parent="1">
-          <mxGeometry x="120" y="610" width="300" height="20" as="geometry" />
+
+        <!-- Arrows -->
+        <mxCell id="arrow1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#666666;" edge="1" parent="1" source="authenticator" target="cognito">
+          <mxGeometry relative="1" as="geometry"/>
         </mxCell>
-        <mxCell id="event-store" value="DynamoDB&#xa;Event Store&#xa;&#xa;pk/sk + GSI&#xa;Stream: ON" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#3334B9;strokeColor=#232F3E;fontColor=#FFFFFF;" vertex="1" parent="1">
-          <mxGeometry x="150" y="650" width="140" height="100" as="geometry" />
+
+        <mxCell id="arrow2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#666666;" edge="1" parent="1" source="data-client" target="appsync">
+          <mxGeometry relative="1" as="geometry"/>
         </mxCell>
-        <mxCell id="read-model" value="DynamoDB&#xa;Read Model&#xa;&#xa;CQRS Query&#xa;On-Demand" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#3334B9;strokeColor=#232F3E;fontColor=#FFFFFF;" vertex="1" parent="1">
-          <mxGeometry x="330" y="650" width="140" height="100" as="geometry" />
+
+        <mxCell id="arrow3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#666666;" edge="1" parent="1" source="storage-client" target="s3-storage">
+          <mxGeometry relative="1" as="geometry"/>
         </mxCell>
-        <mxCell id="session-memory" value="DynamoDB&#xa;Session Memory&#xa;&#xa;TTL: ON&#xa;Redis代替" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#3334B9;strokeColor=#232F3E;fontColor=#FFFFFF;" vertex="1" parent="1">
-          <mxGeometry x="510" y="650" width="140" height="100" as="geometry" />
+
+        <mxCell id="arrow4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#d79b00;" edge="1" parent="1" source="appsync" target="lambda">
+          <mxGeometry relative="1" as="geometry"/>
         </mxCell>
-        <mxCell id="s3-content" value="S3 Bucket&#xa;Content Storage&#xa;&#xa;Audio / Video&#xa;Images / Docs" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#3F8624;strokeColor=#232F3E;fontColor=#FFFFFF;" vertex="1" parent="1">
-          <mxGeometry x="690" y="650" width="140" height="100" as="geometry" />
+
+        <mxCell id="arrow5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#d79b00;" edge="1" parent="1" source="lambda" target="nova-pro">
+          <mxGeometry relative="1" as="geometry"/>
         </mxCell>
-        <mxCell id="s3-vectors" value="S3 Vectors&#xa;(Preview)&#xa;&#xa;Vector Search&#xa;90% Cost Down" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1E8900;strokeColor=#232F3E;fontColor=#FFFFFF;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="870" y="650" width="140" height="100" as="geometry" />
+
+        <!-- Cost Summary -->
+        <mxCell id="cost-box" value="コスト構成 (軽負荷)&#xa;&#xa;Cognito: 無料&#xa;AppSync: ~$10/月&#xa;Lambda: ~$5/月&#xa;S3: ~$2/月&#xa;Bedrock: ~$20/月&#xa;────────────&#xa;合計: ~$40/月" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="1220" y="300" width="160" height="180" as="geometry"/>
         </mxCell>
-        <mxCell id="cloudwatch" value="CloudWatch&#xa;Logs / Metrics" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#759C3E;strokeColor=#232F3E;fontColor=#FFFFFF;" vertex="1" parent="1">
-          <mxGeometry x="1280" y="650" width="140" height="60" as="geometry" />
+
+        <!-- Legend -->
+        <mxCell id="legend-box" value="凡例&#xa;&#xa;🟡 認証&#xa;🟢 API/Data&#xa;🟣 Storage&#xa;🔴 Compute&#xa;🔵 Monitoring" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="1220" y="500" width="160" height="160" as="geometry"/>
         </mxCell>
-        <mxCell id="bedrock-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#C925D1;strokeWidth=2;" vertex="1" parent="1">
-          <mxGeometry x="100" y="820" width="1400" height="140" as="geometry" />
-        </mxCell>
-        <mxCell id="bedrock-label" value="AWS BEDROCK (AI/ML Models)" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontStyle=1;fontColor=#C925D1;" vertex="1" parent="1">
-          <mxGeometry x="120" y="830" width="300" height="20" as="geometry" />
-        </mxCell>
-        <mxCell id="nova-sonic" value="Nova Sonic&#xa;&#xa;音声認識&#xa;話者識別&#xa;感情分析" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#C925D1;strokeColor=#232F3E;fontColor=#FFFFFF;" vertex="1" parent="1">
-          <mxGeometry x="200" y="860" width="160" height="90" as="geometry" />
-        </mxCell>
-        <mxCell id="nova-omni" value="Nova Omni&#xa;&#xa;映像理解&#xa;時系列分析&#xa;異常検知" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#C925D1;strokeColor=#232F3E;fontColor=#FFFFFF;" vertex="1" parent="1">
-          <mxGeometry x="420" y="860" width="160" height="90" as="geometry" />
-        </mxCell>
-        <mxCell id="nova-embeddings" value="Nova Multimodal&#xa;Embeddings&#xa;&#xa;マルチモーダル埋め込み&#xa;統一ベクトル空間" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#C925D1;strokeColor=#232F3E;fontColor=#FFFFFF;" vertex="1" parent="1">
-          <mxGeometry x="640" y="860" width="180" height="90" as="geometry" />
-        </mxCell>
-        <mxCell id="claude" value="Claude 3.5 Sonnet&#xa;&#xa;Foundation Model&#xa;(Agent Orchestration)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#232F3E;strokeColor=#C925D1;fontColor=#FFFFFF;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="880" y="860" width="180" height="90" as="geometry" />
-        </mxCell>
-        <mxCell id="guardrails" value="Bedrock&#xa;Guardrails" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DD344C;strokeColor=#232F3E;fontColor=#FFFFFF;" vertex="1" parent="1">
-          <mxGeometry x="1120" y="870" width="120" height="60" as="geometry" />
-        </mxCell>
-        <mxCell id="conn1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#232F3E;" edge="1" parent="1" source="agui-handler" target="agent-core">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="conn2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#232F3E;" edge="1" parent="1" source="agent-core" target="audio-fn">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="conn3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#232F3E;" edge="1" parent="1" source="agent-core" target="video-fn">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="conn4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#232F3E;" edge="1" parent="1" source="agent-core" target="search-fn">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
+
       </root>
     </mxGraphModel>
   </diagram>
