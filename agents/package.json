@@ -1,0 +1,30 @@
+{
+  "name": "@rd-bedrock-nova/agents",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI Agents - Strands + Bedrock + Tools",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.500.0",
+    "@aws-sdk/client-s3": "^3.500.0",
+    "@aws-sdk/s3-request-presigner": "^3.500.0",
+    "@rd-bedrock-nova/backend": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.1.0"
+  },
+  "exports": {
+    "./strands": "./dist/strands/index.js",
+    "./chat": "./dist/chat/index.js",
+    "./file": "./dist/file/index.js"
+  }
+}

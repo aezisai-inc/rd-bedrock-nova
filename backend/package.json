@@ -1,0 +1,31 @@
+{
+  "name": "@rd-bedrock-nova/backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Clean Architecture Backend - Domain/Application/Infrastructure",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.500.0",
+    "@aws-sdk/util-dynamodb": "^3.500.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@vitest/coverage-v8": "^2.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.1.0"
+  },
+  "exports": {
+    "./domain": "./dist/domain/index.js",
+    "./application": "./dist/application/index.js",
+    "./infrastructure": "./dist/infrastructure/index.js"
+  }
+}
