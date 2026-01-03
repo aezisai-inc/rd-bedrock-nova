@@ -1,22 +1,27 @@
 {
   "name": "rd-bedrock-nova",
   "version": "1.0.0",
-  "description": "Amazon Bedrock Nova シリーズ + Amplify Gen2 + Strands Agent",
+  "private": true,
+  "description": "Amazon Bedrock Nova シリーズ + Clean Architecture + 12 Agent Factor",
   "type": "module",
+  "workspaces": [
+    "frontend",
+    "backend",
+    "agents",
+    "infra/amplify"
+  ],
   "scripts": {
-    "sandbox": "npx ampx sandbox",
-    "sandbox:delete": "npx ampx sandbox delete",
-    "copy:amplify-config": "cp ./amplify_outputs.json ./frontend/amplify_outputs.json",
-    "frontend:dev": "npm run copy:amplify-config && cd frontend && npm run dev",
-    "dev": "echo '1. Run: npm run sandbox (in terminal 1)' && echo '2. Run: npm run frontend:dev (in terminal 2)'",
-    "test": "npm run test:unit && npm run test:e2e",
-    "test:unit": "cd amplify && npm test",
+    "dev": "echo '1. npm run sandbox (terminal 1)' && echo '2. npm run frontend:dev (terminal 2)'",
+    "sandbox": "cd infra/amplify && npx ampx sandbox",
+    "sandbox:delete": "cd infra/amplify && npx ampx sandbox delete",
+    "copy:amplify-config": "cp ./infra/amplify/amplify_outputs.json ./frontend/amplify_outputs.json",
+    "frontend:dev": "npm run copy:amplify-config && npm run dev -w frontend",
+    "build": "npm run build -w backend && npm run build -w agents",
+    "test": "npm run test -w backend && npm run test -w agents && npm run test:e2e",
+    "test:backend": "npm test -w backend",
+    "test:agents": "npm test -w agents",
     "test:e2e": "npx playwright test",
-    "test:e2e:ui": "npx playwright test --ui",
-    "test:e2e:report": "npx playwright show-report"
-  },
-  "dependencies": {
-    "@aws-amplify/backend-cli": "^1.8.1"
+    "test:e2e:ui": "npx playwright test --ui"
   },
   "devDependencies": {
     "@playwright/test": "^1.57.0"
