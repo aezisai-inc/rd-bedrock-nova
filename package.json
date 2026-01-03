@@ -17,11 +17,12 @@
     "copy:amplify-config": "cp ./infra/amplify/amplify_outputs.json ./frontend/amplify_outputs.json",
     "frontend:dev": "npm run copy:amplify-config && npm run dev -w frontend",
     "build": "npm run build -w backend && npm run build -w agents",
-    "test": "npm run test -w backend && npm run test -w agents && npm run test:e2e",
+    "test": "npm run test:backend && npm run test:agents && npm run test:e2e",
     "test:backend": "npm test -w backend",
     "test:agents": "npm test -w agents",
-    "test:e2e": "npx playwright test",
-    "test:e2e:ui": "npx playwright test --ui"
+    "test:e2e": "npx playwright test --config=tests/playwright.config.ts",
+    "test:e2e:ui": "npx playwright test --config=tests/playwright.config.ts --ui",
+    "test:e2e:report": "npx playwright show-report tests/playwright-report"
   },
   "devDependencies": {
     "@playwright/test": "^1.57.0"
