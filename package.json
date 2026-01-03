@@ -8,9 +8,17 @@
     "sandbox:delete": "npx ampx sandbox delete",
     "copy:amplify-config": "cp ./amplify_outputs.json ./frontend/amplify_outputs.json",
     "frontend:dev": "npm run copy:amplify-config && cd frontend && npm run dev",
-    "dev": "echo '1. Run: npm run sandbox (in terminal 1)' && echo '2. Run: npm run frontend:dev (in terminal 2)'"
+    "dev": "echo '1. Run: npm run sandbox (in terminal 1)' && echo '2. Run: npm run frontend:dev (in terminal 2)'",
+    "test": "npm run test:unit && npm run test:e2e",
+    "test:unit": "cd amplify && npm test",
+    "test:e2e": "npx playwright test",
+    "test:e2e:ui": "npx playwright test --ui",
+    "test:e2e:report": "npx playwright show-report"
   },
   "dependencies": {
     "@aws-amplify/backend-cli": "^1.8.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.57.0"
   }
 }

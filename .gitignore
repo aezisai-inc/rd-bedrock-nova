@@ -84,3 +84,7 @@ coverage/
 htmlcov/
 .nyc_output/
 
+
+# Playwright
+playwright-report/
+test-results/

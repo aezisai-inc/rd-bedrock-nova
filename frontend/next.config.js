@@ -1,11 +1,11 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Amplify Hosting は SSR をサポートするため static export は不要
-  // output: 'export',
+  // 静的エクスポート（Amplify Hosting手動デプロイ用）
+  output: 'export',
   
-  // 画像最適化（Amplify Hosting対応）
+  // 画像最適化（静的エクスポートでは無効化が必要）
   images: {
-    unoptimized: false,
+    unoptimized: true,
   },
 
   // 環境変数
