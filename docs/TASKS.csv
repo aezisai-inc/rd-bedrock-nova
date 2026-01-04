@@ -41,3 +41,4 @@ T039,Lambda Functions追加,Knowledge/Generation/Voice リゾルバ追加,comple
 T040,サービス選定ドキュメント,メモリ・検索・生成サービス選定フローチャート,completed,low,documentation,AI Assistant,2026-01-04,,T039,,rd-knowledge-sample統合
 T041,Amplify設定修正+E2Eテスト,generateClient初期化タイミング修正・受入試験E2E自動化18項目,completed,high,testing,AI Assistant,2026-01-05,,T040,,18/21テスト合格
 T042,受入試験結果ドキュメント,E2E自動テスト結果・修正内容・次ステップ文書化,completed,low,documentation,AI Assistant,2026-01-05,,T041,,18/21テスト合格レポート
+T043,S3アップロード権限修正,Storage access rules修正・認証ユーザーのuploads/パス書き込み許可,completed,high,infrastructure,AI Assistant,2026-01-05,,T042,,AccessDenied解消

@@ -15,7 +15,7 @@
     "@aws-sdk/client-bedrock-runtime": "^3.500.0",
     "@aws-sdk/client-s3": "^3.500.0",
     "@aws-sdk/s3-request-presigner": "^3.500.0",
-    "@rd-bedrock-nova/backend": "workspace:*"
+    "@rd-bedrock-nova/backend": "file:../backend"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
