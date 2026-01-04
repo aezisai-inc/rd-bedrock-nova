@@ -36,6 +36,6 @@ T034,Frontend Multimodal UI,frontend/features/multimodal/ 実装,pending,medium,
 T035,Frontend Voice UI,frontend/features/voice/ マイク録音実装,pending,medium,frontend,AI Assistant,2026-01-04,,T032,,Web Audio API
 T036,Frontend Memory UI,frontend/features/memory/ 記憶管理UI,pending,medium,frontend,AI Assistant,2026-01-04,,T028,,セッション履歴/記憶検索
 T037,Shared UI拡張,shared/ui molecules/organisms拡張,pending,medium,frontend,AI Assistant,2026-01-04,,T033,,ImagePreview/VideoPlayer/AudioRecorder
-T038,GraphQL Schema拡張,Knowledge/Generation/Voice スキーマ追加,pending,high,infrastructure,AI Assistant,2026-01-04,,T027,,amplify/data/resource.ts
-T039,Lambda Functions追加,Knowledge/Generation/Voice リゾルバ追加,pending,high,infrastructure,AI Assistant,2026-01-04,,T038,,amplify/functions/
+T038,GraphQL Schema拡張,Knowledge/Generation/Voice スキーマ追加,completed,high,infrastructure,AI Assistant,2026-01-04,,T027,,amplify/data/resource.ts
+T039,Lambda Functions追加,Knowledge/Generation/Voice リゾルバ追加,completed,high,infrastructure,AI Assistant,2026-01-04,,T038,,amplify/functions/
 T040,サービス選定ドキュメント,メモリ・検索・生成サービス選定フローチャート,pending,low,documentation,AI Assistant,2026-01-04,,T039,,rd-knowledge-sample統合
