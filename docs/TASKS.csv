@@ -39,3 +39,4 @@ T037,Shared UI拡張,shared/ui molecules/organisms拡張,completed,medium,fronte
 T038,GraphQL Schema拡張,Knowledge/Generation/Voice スキーマ追加,completed,high,infrastructure,AI Assistant,2026-01-04,,T027,,amplify/data/resource.ts
 T039,Lambda Functions追加,Knowledge/Generation/Voice リゾルバ追加,completed,high,infrastructure,AI Assistant,2026-01-04,,T038,,amplify/functions/
 T040,サービス選定ドキュメント,メモリ・検索・生成サービス選定フローチャート,completed,low,documentation,AI Assistant,2026-01-04,,T039,,rd-knowledge-sample統合
+T041,Amplify設定修正+E2Eテスト,generateClient初期化タイミング修正・受入試験E2E自動化18項目,completed,high,testing,AI Assistant,2026-01-05,,T040,,18/21テスト合格

@@ -1,12 +1,9 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { generateClient } from 'aws-amplify/data';
 import { uploadData, getUrl } from 'aws-amplify/storage';
-import type { Schema } from '../../../amplify/data/resource';
 import ReactMarkdown from 'react-markdown';
-
-const client = generateClient<Schema>();
 
 interface Message {
   id: string;
@@ -24,6 +21,10 @@ export default function ChatPage() {
   const [sessionId] = useState(() => `session-${Date.now()}`);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Amplify client - initialized inside component after Amplify.configure() is called
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const client = useMemo(() => generateClient() as any, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
