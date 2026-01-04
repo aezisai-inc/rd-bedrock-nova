@@ -637,8 +637,6 @@ async function handleRecallMemory(args: RecallMemoryArgs): Promise<unknown> {
 
 async function handleGetSessionHistory(args: GetSessionHistoryArgs): Promise<unknown[]> {
   const { sessionId, limit = 50 } = args;
-  log('INFO', 'GetSessionHistory', { sessionId, limit });
-
-  const events = memoryStore.get(sessionId) || [];
+  log('INFO', 'GetSessionHistory', { sessionId, limit });  const events = memoryStore.get(sessionId) || [];
   return events.slice(-limit);
 }
