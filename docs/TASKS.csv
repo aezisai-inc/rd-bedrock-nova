@@ -27,12 +27,12 @@ T025,Amplify本番デプロイ設定,amplify.yml + Amplify Hosting設定,complet
 T026,AWS本番デプロイ準備,デプロイチェックリスト作成・準備完了,completed,high,deployment,AI Assistant,2025-01-01,2025-01-01,T025,DEPLOY_CHECKLIST.md,実デプロイはユーザーによるAWS認証が必要
 T027,Bedrock Knowledge Bases統合,agents/knowledge-base/ + backend/domain/knowledge/ + frontend/features/knowledge/,completed,high,agents,AI Assistant,2026-01-04,2026-01-04,T026,08-knowledge-domain.md,RDRA+DDD+EventStorming+CleanArchitecture
 T028,AgentCore Memory統合,AgentCore Memory APIへの移行・DynamoDB統合,completed,high,agents,AI Assistant,2026-01-04,,T027,,Phase2メモリ拡張
-T029,Nova Canvas画像生成,Nova Canvas API統合・画像生成ツール,pending,medium,agents,AI Assistant,2026-01-04,,T027,,Generation Bounded Context
+T029,Nova Canvas画像生成,Nova Canvas API統合・画像生成ツール,completed,medium,agents,AI Assistant,2026-01-04,,T027,,Generation Bounded Context
 T030,Nova Reel動画生成,Nova Reel API統合・動画生成ツール,pending,medium,agents,AI Assistant,2026-01-04,,T029,,Generation Bounded Context
 T031,Neo4j/Graphiti統合,グラフデータベース統合・知識グラフ,pending,medium,agents,AI Assistant,2026-01-04,,T028,,Phase3グラフ拡張
 T032,双方向音声対話,WebSocket + Nova Sonic双方向ストリーミング,pending,medium,agents,AI Assistant,2026-01-04,,T027,,Voice Bounded Context
 T033,Frontend Knowledge UI,frontend/features/knowledge/ 実装,completed,high,frontend,AI Assistant,2026-01-04,2026-01-04,T027,,FSD+Atomic Design
-T034,Frontend Multimodal UI,frontend/features/multimodal/ 実装,pending,medium,frontend,AI Assistant,2026-01-04,,T029,,画像/動画生成UI
+T034,Frontend Multimodal UI,frontend/features/multimodal/ 実装,completed,medium,frontend,AI Assistant,2026-01-04,,T029,,画像/動画生成UI
 T035,Frontend Voice UI,frontend/features/voice/ マイク録音実装,pending,medium,frontend,AI Assistant,2026-01-04,,T032,,Web Audio API
 T036,Frontend Memory UI,frontend/features/memory/ 記憶管理UI,completed,medium,frontend,AI Assistant,2026-01-04,,T028,,セッション履歴/記憶検索
 T037,Shared UI拡張,shared/ui molecules/organisms拡張,pending,medium,frontend,AI Assistant,2026-01-04,,T033,,ImagePreview/VideoPlayer/AudioRecorder
