@@ -13,7 +13,7 @@
  * - Knowledge: Bedrock KB検索/RAG
  * - Generation: 画像/動画生成
  * - Voice: 音声認識/合成
- * - Memory: セッション記憶
+ * - Memory: セッション記憶 (DynamoDB永続化)
  *
  * ## 設計原則
  * - strands-agents + bedrock-agentcore統合
@@ -36,6 +36,8 @@ import {
   PutObjectCommand,
   GetObjectCommand,
 } from '@aws-sdk/client-s3';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocumentClient, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 // =============================================================================
@@ -46,12 +48,15 @@ const REGION = process.env.AWS_REGION || 'ap-northeast-1';
 const bedrockClient = new BedrockRuntimeClient({ region: REGION });
 const bedrockAgentClient = new BedrockAgentRuntimeClient({ region: REGION });
 const s3Client = new S3Client({ region: REGION });
+const dynamoDbClient = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }));
 
 // Environment
 const KNOWLEDGE_BASE_ID = process.env.KNOWLEDGE_BASE_ID || '';
 const MODEL_ID = process.env.MODEL_ID || 'amazon.nova-micro-v1:0';
 const MODEL_ARN = process.env.MODEL_ARN || `arn:aws:bedrock:${REGION}::foundation-model/anthropic.claude-3-haiku-20240307-v1:0`;
 const STORAGE_BUCKET = process.env.STORAGE_BUCKET_NAME || '';
+const MEMORY_TABLE = process.env.MEMORY_TABLE || '';
+const SESSION_TABLE = process.env.SESSION_TABLE || '';
 
 // =============================================================================
 // Types
@@ -180,10 +185,10 @@ export const handler: AppSyncResolverHandler<unknown, unknown> = async (event) =
       fieldName: resolverEvent.fieldName,
       error: error instanceof Error ? error.message : String(error),
     });
-    throw error;
+    const safeMessage = error instanceof Error ? error.message : 'Internal server error';
+    throw new Error(safeMessage.includes('not configured') ? safeMessage : 'Request processing failed');
   }
 };
-
 async function routeRequest(event: ResolverEvent): Promise<unknown> {
   const { fieldName, arguments: args, identity } = event;
   const userId = identity?.sub;
@@ -457,11 +462,12 @@ async function handleGetVideoStatus(args: GetVideoStatusArgs): Promise<unknown> 
   log('INFO', 'GetVideoStatus', { videoId });
 
   // Check S3 for completed video
-  // For now return mock status
+  // TODO: Nova Reel async job tracking requires StartAsyncInvoke implementation
+  // This returns a placeholder status until async job tracking is implemented
   return {
     videoId,
-    status: 'processing',
-    progress: 50,
+    status: 'pending',
+    progress: 0,
   };
 }
 
@@ -576,18 +582,9 @@ async function handleVoiceConverse(args: VoiceConverseArgs): Promise<unknown> {
 }
 
 // =============================================================================
-// Memory Handlers (AgentCore Memory)
 // =============================================================================
-
-// In-memory storage (replace with AgentCore Memory in production)
-const memoryStore = new Map<string, Array<{
-  eventId: string;
-  sessionId: string;
-  role: string;
-  content: string;
-  timestamp: string;
-  metadata?: Record<string, unknown>;
-}>>();
+// Memory Handlers (DynamoDB永続化)
+// =============================================================================
 
 async function handleStoreMemory(
   args: StoreMemoryArgs,
@@ -596,47 +593,117 @@ async function handleStoreMemory(
   const { sessionId, role, content, metadata } = args;
   log('INFO', 'StoreMemory', { sessionId, role });
 
+  if (!MEMORY_TABLE) {
+    throw new Error('Memory table is not configured');
+  }
+
+  const eventId = `evt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  const timestamp = new Date().toISOString();
+  
+  // TTL: 30 days from now
+  const ttl = Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60);
+
   const event = {
-    eventId: `evt-${Date.now()}`,
+    sessionId,
+    eventId,
+    role,
+    content,
+    timestamp,
+    userId: userId ?? 'anonymous',
+    metadata: metadata ?? {},
+    ttl,
+  };
+
+  await dynamoDbClient.send(
+    new PutCommand({
+      TableName: MEMORY_TABLE,
+      Item: event,
+    })
+  );
+
+  return {
+    eventId,
     sessionId,
     role,
     content,
-    timestamp: new Date().toISOString(),
-    metadata: { ...metadata, userId },
+    timestamp,
+    metadata: event.metadata,
   };
-
-  const events = memoryStore.get(sessionId) || [];
-  events.push(event);
-  memoryStore.set(sessionId, events);
-
-  return event;
 }
 
 async function handleRecallMemory(args: RecallMemoryArgs): Promise<unknown> {
   const { sessionId, query, limit = 10, offset = 0 } = args;
   log('INFO', 'RecallMemory', { sessionId, query, limit });
 
-  const events = memoryStore.get(sessionId) || [];
+  if (!MEMORY_TABLE) {
+    throw new Error('Memory table is not configured');
+  }
 
-  // Simple filtering if query provided
-  let filteredEvents = events;
+  const response = await dynamoDbClient.send(
+    new QueryCommand({
+      TableName: MEMORY_TABLE,
+      KeyConditionExpression: 'sessionId = :sessionId',
+      ExpressionAttributeValues: {
+        ':sessionId': sessionId,
+      },
+      ScanIndexForward: true,
+    })
+  );
+
+  let events = response.Items || [];
+
   if (query) {
-    filteredEvents = events.filter((e) =>
-      e.content.toLowerCase().includes(query.toLowerCase())
+    const lowerQuery = query.toLowerCase();
+    events = events.filter((e) =>
+      (e.content as string).toLowerCase().includes(lowerQuery)
     );
   }
 
-  const pagedEvents = filteredEvents.slice(offset, offset + limit);
+  const totalCount = events.length;
+  const pagedEvents = events.slice(offset, offset + limit);
 
   return {
-    events: pagedEvents,
-    totalCount: filteredEvents.length,
-    hasMore: offset + limit < filteredEvents.length,
+    events: pagedEvents.map((e) => ({
+      eventId: e.eventId,
+      sessionId: e.sessionId,
+      role: e.role,
+      content: e.content,
+      timestamp: e.timestamp,
+      metadata: e.metadata,
+    })),
+    totalCount,
+    hasMore: offset + limit < totalCount,
   };
 }
 
 async function handleGetSessionHistory(args: GetSessionHistoryArgs): Promise<unknown[]> {
   const { sessionId, limit = 50 } = args;
-  log('INFO', 'GetSessionHistory', { sessionId, limit });  const events = memoryStore.get(sessionId) || [];
-  return events.slice(-limit);
+  log('INFO', 'GetSessionHistory', { sessionId, limit });
+
+  if (!MEMORY_TABLE) {
+    throw new Error('Memory table is not configured');
+  }
+
+  const response = await dynamoDbClient.send(
+    new QueryCommand({
+      TableName: MEMORY_TABLE,
+      KeyConditionExpression: 'sessionId = :sessionId',
+      ExpressionAttributeValues: {
+        ':sessionId': sessionId,
+      },
+      ScanIndexForward: false,
+      Limit: limit,
+    })
+  );
+
+  const events = response.Items || [];
+  
+  return events.reverse().map((e) => ({
+    eventId: e.eventId,
+    sessionId: e.sessionId,
+    role: e.role,
+    content: e.content,
+    timestamp: e.timestamp,
+    metadata: e.metadata,
+  }));
 }
