@@ -14,8 +14,23 @@ export class MessageContent extends ValueObject<{ text: string }> {
     return this.props.text;
   }
 
+  /** Alias for text (for compatibility) */
+  get value(): string {
+    return this.props.text;
+  }
+
   get length(): number {
     return this.props.text.length;
+  }
+
+  /**
+   * 内容を指定長で切り詰め
+   */
+  truncate(maxLength: number): MessageContent {
+    if (this.props.text.length <= maxLength) {
+      return this;
+    }
+    return MessageContent.fromExisting(this.props.text.slice(0, maxLength) + '...');
   }
 
   /**

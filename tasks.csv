@@ -1,0 +1,18 @@
+id,title,status,priority,created_at,completed_at
+T001,Amplify Gen2 Backend Setup,completed,high,2025-01-01,2025-01-03
+T002,GraphQL Schema Definition,completed,high,2025-01-01,2025-01-03
+T003,Lambda Agent Handler,completed,high,2025-01-02,2025-01-04
+T004,Frontend Chat UI,completed,medium,2025-01-02,2025-01-04
+T005,S3 Storage Integration,completed,medium,2025-01-03,2025-01-05
+T006,Amplify Hosting Deployment,completed,high,2025-01-04,2025-01-05
+T007,E2E Tests Implementation,completed,high,2025-01-04,2025-01-05
+T008,S3 Upload Permission Fix,completed,high,2025-01-05,2025-01-05
+T009,Acceptance Test Results,completed,medium,2025-01-05,2025-01-05
+T010,Voice Feature - GraphQL API Integration,completed,high,2025-01-05,2025-01-05
+T011,Memory Feature - GraphQL API Integration,completed,high,2025-01-05,2025-01-05
+T012,SES Email Configuration for Cognito,blocked,high,2025-01-05,
+T013,Comprehensive Test Execution,completed,high,2025-01-05,2025-01-05
+T014,Environment Variables Validation,completed,medium,2025-01-05,2025-01-05
+T015,CORS Configuration Validation,completed,medium,2025-01-05,2025-01-05
+T016,Backend Unit Tests Fix,completed,high,2025-01-05,2025-01-05
+T017,Frontend GraphQL API Integration,completed,high,2025-01-05,2025-01-05
