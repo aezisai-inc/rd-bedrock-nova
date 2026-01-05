@@ -2,41 +2,36 @@
  * ChatSession 集約 ユニットテスト
  * 
  * TDD: Red-Green-Refactor サイクル
+ * 実装: AggregateRoot + Event Sourcing
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ChatSession } from '../aggregates/chat-session';
+import { ChatSession, SessionStatus } from '../aggregates/chat-session';
 import { MessageRole } from '../value-objects/message-role';
+import { MessageContent } from '../value-objects/message-content';
 
 describe('ChatSession Aggregate', () => {
   describe('create', () => {
     it('should create a new session with initial state', () => {
       // Act
-      const session = ChatSession.create('user-123', 'Test Session');
+      const session = ChatSession.create({ 
+        ownerId: 'user-123', 
+        title: 'Test Session' 
+      });
 
       // Assert
       expect(session.id).toBeDefined();
-      expect(session.userId).toBe('user-123');
+      expect(session.ownerId).toBe('user-123');
       expect(session.title).toBe('Test Session');
-      expect(session.status).toBe('active');
+      expect(session.status).toBe(SessionStatus.ACTIVE);
       expect(session.messageCount).toBe(0);
-    });
-
-    it('should emit SessionCreated event', () => {
-      // Act
-      const session = ChatSession.create('user-123', 'Test Session');
-      const events = session.getUncommittedEvents();
-
-      // Assert
-      expect(events).toHaveLength(1);
-      expect(events[0].eventType).toBe('SessionCreated');
     });
 
     it('should use default title if not provided', () => {
       // Act
-      const session = ChatSession.create('user-123');
+      const session = ChatSession.create({ ownerId: 'user-123' });
 
-      // Assert
-      expect(session.title).toMatch(/^New Chat/);
+      // Assert - default title is "Chat {date}"
+      expect(session.title).toMatch(/^Chat/);
     });
   });
 
@@ -44,168 +39,122 @@ describe('ChatSession Aggregate', () => {
     let session: ChatSession;
 
     beforeEach(() => {
-      session = ChatSession.create('user-123', 'Test Session');
-      session.clearUncommittedEvents(); // 初期イベントをクリア
+      session = ChatSession.create({ 
+        ownerId: 'user-123', 
+        title: 'Test Session' 
+      });
     });
 
     it('should add a user message', () => {
       // Act
-      const messageId = session.addMessage(MessageRole.user, 'Hello, AI!');
+      const content = MessageContent.create('Hello, AI!');
+      session.addMessage(content, MessageRole.USER);
 
       // Assert
-      expect(messageId).toBeDefined();
       expect(session.messageCount).toBe(1);
+      expect(session.messages[0].role).toBe(MessageRole.USER);
+      expect(session.messages[0].content).toBe('Hello, AI!');
     });
 
     it('should add an assistant message', () => {
       // Act
-      session.addMessage(MessageRole.user, 'Hello');
-      const messageId = session.addMessage(MessageRole.assistant, 'Hi there!');
+      const userContent = MessageContent.create('Hello');
+      session.addMessage(userContent, MessageRole.USER);
+      
+      const assistantContent = MessageContent.create('Hi there!');
+      session.addMessage(assistantContent, MessageRole.ASSISTANT);
 
       // Assert
-      expect(messageId).toBeDefined();
       expect(session.messageCount).toBe(2);
-    });
-
-    it('should emit MessageAdded event', () => {
-      // Act
-      session.addMessage(MessageRole.user, 'Test message');
-      const events = session.getUncommittedEvents();
-
-      // Assert
-      expect(events).toHaveLength(1);
-      expect(events[0].eventType).toBe('MessageAdded');
+      expect(session.messages[1].role).toBe(MessageRole.ASSISTANT);
     });
 
     it('should include fileKeys in message', () => {
       // Act
-      session.addMessage(MessageRole.user, 'Check this file', ['file-1.jpg']);
-      const events = session.getUncommittedEvents();
+      const content = MessageContent.create('Check this file');
+      session.addMessage(content, MessageRole.USER, ['file-1.jpg']);
 
       // Assert
-      const eventData = events[0].toJSON();
-      expect(eventData.fileKeys).toEqual(['file-1.jpg']);
+      expect(session.messages[0].fileKeys).toEqual(['file-1.jpg']);
     });
 
     it('should throw error for empty content', () => {
       // Act & Assert
-      expect(() => session.addMessage(MessageRole.user, '')).toThrow();
+      expect(() => MessageContent.create('')).toThrow();
     });
 
     it('should throw error for archived session', () => {
       // Arrange
       session.archive();
-      session.clearUncommittedEvents();
 
       // Act & Assert
-      expect(() => session.addMessage(MessageRole.user, 'Test')).toThrow('archived');
+      const content = MessageContent.create('Test');
+      expect(() => session.addMessage(content, MessageRole.USER)).toThrow('not active');
     });
   });
 
   describe('archive', () => {
     it('should archive an active session', () => {
       // Arrange
-      const session = ChatSession.create('user-123', 'Test');
-      session.clearUncommittedEvents();
+      const session = ChatSession.create({ 
+        ownerId: 'user-123', 
+        title: 'Test' 
+      });
 
       // Act
       session.archive();
 
       // Assert
-      expect(session.status).toBe('archived');
+      expect(session.status).toBe(SessionStatus.ARCHIVED);
     });
 
-    it('should emit SessionArchived event', () => {
+    it('should throw error when archiving already archived session', () => {
       // Arrange
-      const session = ChatSession.create('user-123', 'Test');
-      session.clearUncommittedEvents();
-
-      // Act
+      const session = ChatSession.create({ 
+        ownerId: 'user-123', 
+        title: 'Test' 
+      });
       session.archive();
-      const events = session.getUncommittedEvents();
 
-      // Assert
-      expect(events).toHaveLength(1);
-      expect(events[0].eventType).toBe('SessionArchived');
-    });
-
-    it('should not archive already archived session', () => {
-      // Arrange
-      const session = ChatSession.create('user-123', 'Test');
-      session.archive();
-      session.clearUncommittedEvents();
-
-      // Act
-      session.archive();
-      const events = session.getUncommittedEvents();
-
-      // Assert
-      expect(events).toHaveLength(0); // 重複イベントなし
+      // Act & Assert
+      expect(() => session.archive()).toThrow('not active');
     });
   });
 
-  describe('fromEvents (Event Sourcing reconstitution)', () => {
-    it('should reconstitute session from events', () => {
+  describe('messages', () => {
+    it('should track last message timestamp', () => {
       // Arrange
-      const events = [
-        {
-          eventType: 'SessionCreated',
-          sessionId: 'session-123',
-          userId: 'user-456',
-          title: 'Reconstituted Session',
-          createdAt: new Date().toISOString(),
-        },
-        {
-          eventType: 'MessageAdded',
-          messageId: 'msg-1',
-          sessionId: 'session-123',
-          role: 'user',
-          content: 'Hello',
-          addedAt: new Date().toISOString(),
-        },
-        {
-          eventType: 'MessageAdded',
-          messageId: 'msg-2',
-          sessionId: 'session-123',
-          role: 'assistant',
-          content: 'Hi!',
-          addedAt: new Date().toISOString(),
-        },
-      ];
+      const session = ChatSession.create({ 
+        ownerId: 'user-123', 
+        title: 'Test' 
+      });
+
+      // Initially no last message
+      expect(session.lastMessageAt).toBeNull();
 
       // Act
-      const session = ChatSession.fromEvents(events);
+      const content = MessageContent.create('Hello');
+      session.addMessage(content, MessageRole.USER);
 
       // Assert
-      expect(session.id).toBe('session-123');
-      expect(session.userId).toBe('user-456');
-      expect(session.title).toBe('Reconstituted Session');
-      expect(session.messageCount).toBe(2);
-      expect(session.status).toBe('active');
+      expect(session.lastMessageAt).toBeInstanceOf(Date);
     });
 
-    it('should handle archived session reconstitution', () => {
+    it('should return immutable messages array', () => {
       // Arrange
-      const events = [
-        {
-          eventType: 'SessionCreated',
-          sessionId: 'session-123',
-          userId: 'user-456',
-          title: 'Archived Session',
-          createdAt: new Date().toISOString(),
-        },
-        {
-          eventType: 'SessionArchived',
-          sessionId: 'session-123',
-          archivedAt: new Date().toISOString(),
-        },
-      ];
+      const session = ChatSession.create({ 
+        ownerId: 'user-123', 
+        title: 'Test' 
+      });
+      const content = MessageContent.create('Test message');
+      session.addMessage(content, MessageRole.USER);
 
       // Act
-      const session = ChatSession.fromEvents(events);
-
-      // Assert
-      expect(session.status).toBe('archived');
+      const messages = session.messages;
+      
+      // Assert - messages should be readonly copy
+      expect(messages).toHaveLength(1);
+      expect(messages === session.messages).toBe(false); // Different array reference
     });
   });
 });

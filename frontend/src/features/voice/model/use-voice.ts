@@ -2,9 +2,12 @@
  * Voice Feature - Model Layer (FSD)
  *
  * React hooks for Nova Sonic voice integration
+ * GraphQL API経由でAmplify Lambdaを呼び出す
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { generateClient } from 'aws-amplify/data';
+import { uploadData } from 'aws-amplify/storage';
 
 // =============================================================================
 // Types
@@ -95,58 +98,11 @@ class AudioRecorder {
 }
 
 // =============================================================================
-// API Client
+// GraphQL Client
 // =============================================================================
 
-const API_ENDPOINT = process.env.NEXT_PUBLIC_API_ENDPOINT || '/api';
-
-async function transcribeAudioApi(audioBase64: string): Promise<TranscriptionResult> {
-  const response = await fetch(`${API_ENDPOINT}/voice/transcribe`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ audioBase64 }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Transcription failed: ${response.statusText}`);
-  }
-
-  return response.json();
-}
-
-async function synthesizeSpeechApi(
-  text: string,
-  voice?: string
-): Promise<SynthesizedAudio> {
-  const response = await fetch(`${API_ENDPOINT}/voice/synthesize`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, voice }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Synthesis failed: ${response.statusText}`);
-  }
-
-  return response.json();
-}
-
-async function voiceConverseApi(
-  sessionId: string,
-  audioBase64: string
-): Promise<VoiceConverseResult> {
-  const response = await fetch(`${API_ENDPOINT}/voice/converse`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId, audioBase64 }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Voice conversation failed: ${response.statusText}`);
-  }
-
-  return response.json();
-}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const getClient = () => generateClient() as any;
 
 // =============================================================================
 // Hooks
@@ -241,7 +197,7 @@ export function useVoiceRecorder() {
 }
 
 /**
- * useVoiceConverse - 音声対話フック
+ * useVoiceConverse - 音声対話フック (GraphQL API使用)
  */
 export function useVoiceConverse(sessionId: string) {
   const [result, setResult] = useState<VoiceConverseResult | null>(null);
@@ -257,11 +213,27 @@ export function useVoiceConverse(sessionId: string) {
       setError(null);
 
       try {
-        // Convert blob to base64
-        const arrayBuffer = await audioBlob.arrayBuffer();
-        const base64 = Buffer.from(arrayBuffer).toString('base64');
+        const client = getClient();
+        
+        // 1. Upload audio to S3
+        const s3Key = `voice/${sessionId}/${Date.now()}.webm`;
+        await uploadData({
+          path: s3Key,
+          data: audioBlob,
+          options: { contentType: 'audio/webm' },
+        });
 
-        const converseResult = await voiceConverseApi(sessionId, base64);
+        // 2. Call voiceConverse mutation
+        const response = await client.mutations.voiceConverse({
+          sessionId,
+          audioS3Key: s3Key,
+        });
+
+        if (response.errors) {
+          throw new Error(response.errors[0]?.message || 'Voice conversation failed');
+        }
+
+        const converseResult = response.data as VoiceConverseResult;
         setResult(converseResult);
         setConversationHistory((prev) => [...prev, converseResult]);
 
@@ -309,7 +281,7 @@ export function useVoiceConverse(sessionId: string) {
 }
 
 /**
- * useTextToSpeech - TTS フック
+ * useTextToSpeech - TTS フック (GraphQL API使用)
  */
 export function useTextToSpeech() {
   const [audio, setAudio] = useState<SynthesizedAudio | null>(null);
@@ -322,7 +294,19 @@ export function useTextToSpeech() {
     setError(null);
 
     try {
-      const result = await synthesizeSpeechApi(text, voice);
+      const client = getClient();
+      
+      const response = await client.mutations.synthesizeSpeech({
+        text,
+        voice,
+        language: 'ja-JP',
+      });
+
+      if (response.errors) {
+        throw new Error(response.errors[0]?.message || 'Synthesis failed');
+      }
+
+      const result = response.data as SynthesizedAudio;
       setAudio(result);
 
       // Play audio if available
@@ -358,5 +342,57 @@ export function useTextToSpeech() {
     audioRef,
     synthesize,
     stop,
+  };
+}
+
+/**
+ * useTranscription - 音声認識フック (GraphQL API使用)
+ */
+export function useTranscription() {
+  const [transcription, setTranscription] = useState<TranscriptionResult | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+
+  const transcribe = useCallback(async (audioS3Key: string, language?: string) => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const client = getClient();
+      
+      const response = await client.mutations.transcribeAudio({
+        audioS3Key,
+        language: language || 'ja-JP',
+        enableSpeakerDiarization: false,
+      });
+
+      if (response.errors) {
+        throw new Error(response.errors[0]?.message || 'Transcription failed');
+      }
+
+      const result = response.data as TranscriptionResult;
+      setTranscription(result);
+
+      return result;
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error('Transcription failed');
+      setError(error);
+      throw error;
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const clear = useCallback(() => {
+    setTranscription(null);
+    setError(null);
+  }, []);
+
+  return {
+    transcription,
+    isLoading,
+    error,
+    transcribe,
+    clear,
   };
 }

@@ -2,9 +2,11 @@
  * Memory Feature - Model Layer (FSD)
  *
  * React hooks for AgentCore Memory integration
+ * GraphQL API経由でAmplify Lambdaを呼び出す
  */
 
 import { useState, useCallback, useEffect } from 'react';
+import { generateClient } from 'aws-amplify/data';
 
 // =============================================================================
 // Types
@@ -35,72 +37,18 @@ export interface MemorySearchResult {
 }
 
 // =============================================================================
-// API Client
+// GraphQL Client
 // =============================================================================
 
-const API_ENDPOINT = process.env.NEXT_PUBLIC_API_ENDPOINT || '/api';
-
-async function storeMemoryApi(
-  sessionId: string,
-  role: 'user' | 'assistant' | 'system',
-  content: string,
-  metadata?: Record<string, unknown>
-): Promise<MemoryEvent> {
-  const response = await fetch(`${API_ENDPOINT}/memory/store`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId, role, content, metadata }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to store memory: ${response.statusText}`);
-  }
-
-  return response.json();
-}
-
-async function recallMemoryApi(
-  sessionId: string,
-  query?: string,
-  limit?: number,
-  offset?: number
-): Promise<MemorySearchResult> {
-  const params = new URLSearchParams({ sessionId });
-  if (query) params.append('query', query);
-  if (limit) params.append('limit', limit.toString());
-  if (offset) params.append('offset', offset.toString());
-
-  const response = await fetch(`${API_ENDPOINT}/memory/recall?${params}`);
-
-  if (!response.ok) {
-    throw new Error(`Failed to recall memory: ${response.statusText}`);
-  }
-
-  return response.json();
-}
-
-async function getHistoryApi(
-  sessionId: string,
-  limit?: number
-): Promise<MemoryEvent[]> {
-  const params = new URLSearchParams({ sessionId });
-  if (limit) params.append('limit', limit.toString());
-
-  const response = await fetch(`${API_ENDPOINT}/memory/history?${params}`);
-
-  if (!response.ok) {
-    throw new Error(`Failed to get history: ${response.statusText}`);
-  }
-
-  return response.json();
-}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const getClient = () => generateClient() as any;
 
 // =============================================================================
 // Hooks
 // =============================================================================
 
 /**
- * useMemorySession - セッション記憶管理フック
+ * useMemorySession - セッション記憶管理フック (GraphQL API使用)
  */
 export function useMemorySession(sessionId: string) {
   const [events, setEvents] = useState<MemoryEvent[]>([]);
@@ -114,7 +62,17 @@ export function useMemorySession(sessionId: string) {
     const loadHistory = async () => {
       setIsLoading(true);
       try {
-        const history = await getHistoryApi(sessionId, 50);
+        const client = getClient();
+        const response = await client.queries.getSessionHistory({
+          sessionId,
+          limit: 50,
+        });
+
+        if (response.errors) {
+          throw new Error(response.errors[0]?.message || 'Failed to load history');
+        }
+
+        const history = (response.data || []) as MemoryEvent[];
         setEvents(history);
       } catch (err) {
         setError(err instanceof Error ? err : new Error('Failed to load history'));
@@ -133,7 +91,19 @@ export function useMemorySession(sessionId: string) {
       metadata?: Record<string, unknown>
     ) => {
       try {
-        const event = await storeMemoryApi(sessionId, role, content, metadata);
+        const client = getClient();
+        const response = await client.mutations.storeMemory({
+          sessionId,
+          role,
+          content,
+          metadata,
+        });
+
+        if (response.errors) {
+          throw new Error(response.errors[0]?.message || 'Failed to store memory');
+        }
+
+        const event = response.data as MemoryEvent;
         setEvents((prev) => [...prev, event]);
         return event;
       } catch (err) {
@@ -148,8 +118,18 @@ export function useMemorySession(sessionId: string) {
     async (query: string, limit?: number) => {
       setIsLoading(true);
       try {
-        const result = await recallMemoryApi(sessionId, query, limit);
-        return result;
+        const client = getClient();
+        const response = await client.queries.recallMemory({
+          sessionId,
+          query,
+          limit: limit || 10,
+        });
+
+        if (response.errors) {
+          throw new Error(response.errors[0]?.message || 'Search failed');
+        }
+
+        return response.data as MemorySearchResult;
       } catch (err) {
         setError(err instanceof Error ? err : new Error('Search failed'));
         throw err;
@@ -163,7 +143,17 @@ export function useMemorySession(sessionId: string) {
   const refresh = useCallback(async () => {
     setIsLoading(true);
     try {
-      const history = await getHistoryApi(sessionId, 50);
+      const client = getClient();
+      const response = await client.queries.getSessionHistory({
+        sessionId,
+        limit: 50,
+      });
+
+      if (response.errors) {
+        throw new Error(response.errors[0]?.message || 'Refresh failed');
+      }
+
+      const history = (response.data || []) as MemoryEvent[];
       setEvents(history);
     } catch (err) {
       setError(err instanceof Error ? err : new Error('Refresh failed'));
@@ -183,7 +173,7 @@ export function useMemorySession(sessionId: string) {
 }
 
 /**
- * useMemorySearch - 記憶検索フック
+ * useMemorySearch - 記憶検索フック (GraphQL API使用)
  */
 export function useMemorySearch(sessionId: string) {
   const [results, setResults] = useState<MemorySearchResult | null>(null);
@@ -201,12 +191,19 @@ export function useMemorySearch(sessionId: string) {
       setError(null);
 
       try {
-        const result = await recallMemoryApi(
+        const client = getClient();
+        const response = await client.queries.recallMemory({
           sessionId,
           query,
-          options?.limit,
-          options?.offset
-        );
+          limit: options?.limit || 10,
+          offset: options?.offset || 0,
+        });
+
+        if (response.errors) {
+          throw new Error(response.errors[0]?.message || 'Search failed');
+        }
+
+        const result = response.data as MemorySearchResult;
         setResults(result);
         return result;
       } catch (err) {
@@ -231,5 +228,53 @@ export function useMemorySearch(sessionId: string) {
     error,
     search,
     clear,
+  };
+}
+
+/**
+ * useMemoryStore - 記憶保存専用フック (GraphQL API使用)
+ */
+export function useMemoryStore(sessionId: string) {
+  const [isStoring, setIsStoring] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+
+  const store = useCallback(
+    async (
+      role: 'user' | 'assistant' | 'system',
+      content: string,
+      metadata?: Record<string, unknown>
+    ) => {
+      setIsStoring(true);
+      setError(null);
+
+      try {
+        const client = getClient();
+        const response = await client.mutations.storeMemory({
+          sessionId,
+          role,
+          content,
+          metadata,
+        });
+
+        if (response.errors) {
+          throw new Error(response.errors[0]?.message || 'Store failed');
+        }
+
+        return response.data as MemoryEvent;
+      } catch (err) {
+        const error = err instanceof Error ? err : new Error('Store failed');
+        setError(error);
+        throw error;
+      } finally {
+        setIsStoring(false);
+      }
+    },
+    [sessionId]
+  );
+
+  return {
+    isStoring,
+    error,
+    store,
   };
 }
