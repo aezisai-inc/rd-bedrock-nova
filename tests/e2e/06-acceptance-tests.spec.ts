@@ -260,38 +260,76 @@ test.describe('ファイルアップロードテスト', () => {
 });
 
 // =============================================================================
-// 音声機能テスト (VO-001 ~ VO-005 相当) - プレースホルダー
+// 機能ページテスト (Voice/Memory/Multimodal統合)
 // =============================================================================
 
-test.describe('音声機能テスト', () => {
+test.describe('機能ページテスト', () => {
+  test.beforeEach(async ({ page }) => {
+    await login(page);
+  });
+
+  test('機能ページに遷移できる', async ({ page }) => {
+    // Featuresリンクをクリック
+    const featuresLink = page.locator('[data-testid="nav-features"]');
+    await expect(featuresLink).toBeVisible({ timeout: 10000 });
+    await featuresLink.click();
+
+    // 機能タブが表示される
+    await expect(page.locator('[data-testid="feature-tabs"]')).toBeVisible();
+    await expect(page.locator('[data-testid="tab-voice"]')).toBeVisible();
+    await expect(page.locator('[data-testid="tab-memory"]')).toBeVisible();
+    await expect(page.locator('[data-testid="tab-multimodal"]')).toBeVisible();
+  });
+
+  test('VO-002: Voice UIが正しく表示される', async ({ page }) => {
+    await page.goto(`${BASE_URL}/features`);
+    await page.waitForLoadState('networkidle');
+
+    // Voiceタブがデフォルトで選択されている
+    const voiceTab = page.locator('[data-testid="tab-voice"]');
+    await expect(voiceTab).toBeVisible();
+
+    // VoicePanelコンテナが表示される
+    await expect(page.locator('[data-testid="voice-panel-container"]')).toBeVisible();
+  });
+
+  test('ME-001: Memory UIが正しく表示される', async ({ page }) => {
+    await page.goto(`${BASE_URL}/features`);
+    await page.waitForLoadState('networkidle');
+
+    // Memoryタブをクリック
+    const memoryTab = page.locator('[data-testid="tab-memory"]');
+    await memoryTab.click();
+
+    // MemoryPanelが表示される
+    await expect(page.locator('[data-testid="memory-panel-container"]')).toBeVisible();
+  });
+
+  test('MM-005: Multimodal UIが正しく表示される', async ({ page }) => {
+    await page.goto(`${BASE_URL}/features`);
+    await page.waitForLoadState('networkidle');
+
+    // Multimodalタブをクリック
+    const multimodalTab = page.locator('[data-testid="tab-multimodal"]');
+    await multimodalTab.click();
+
+    // MultimodalPanelが表示される
+    await expect(page.locator('[data-testid="multimodal-panel-container"]')).toBeVisible();
+  });
+
   test.skip('VO-001: マイク許可要求 - ブラウザがマイク許可を求める', async ({ page }) => {
-    // 音声機能が実装されている場合にテスト
-    await login(page);
-    // TODO: 音声機能UIが実装されたら有効化
+    // マイク許可はブラウザUI操作が必要なためヘッドレスでテスト不可
+    // 実機テストで検証
   });
 });
 
 // =============================================================================
-// メモリ機能テスト (ME-001 ~ ME-004 相当) - プレースホルダー
-// =============================================================================
-
-test.describe('メモリ機能テスト', () => {
-  test.skip('ME-001: セッション作成 - 新規セッションが作成される', async ({ page }) => {
-    // メモリ機能UIが実装されている場合にテスト
-    await login(page);
-    // TODO: メモリ機能UIが実装されたら有効化
-  });
-});
-
-// =============================================================================
-// グラフ機能テスト (GR-001 ~ GR-003 相当) - プレースホルダー
+// グラフ機能テスト (不採用技術 - スキップ)
 // =============================================================================
 
 test.describe('グラフ機能テスト', () => {
-  test.skip('GR-001: テキスト入力 - 分析対象テキストを入力可能', async ({ page }) => {
-    // グラフ機能UIが実装されている場合にテスト
-    await login(page);
-    // TODO: グラフ機能UIが実装されたら有効化
+  test.skip('GR-001: テキスト入力 - 不採用技術のためスキップ', async () => {
+    // Neo4j/Graphitiは不採用のためスキップ
   });
 });
 
