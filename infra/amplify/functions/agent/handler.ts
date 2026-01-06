@@ -35,6 +35,7 @@ import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
 } from '@aws-sdk/client-s3';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
@@ -461,14 +462,54 @@ async function handleGetVideoStatus(args: GetVideoStatusArgs): Promise<unknown> 
   const { videoId } = args;
   log('INFO', 'GetVideoStatus', { videoId });
 
-  // Check S3 for completed video
-  // TODO: Nova Reel async job tracking requires StartAsyncInvoke implementation
-  // This returns a placeholder status until async job tracking is implemented
-  return {
-    videoId,
-    status: 'pending',
-    progress: 0,
-  };
+  // Check S3 for completed video file
+  // Nova Reel async job tracking would use StartAsyncInvoke, but for now we check S3 directly
+  try {
+    // Attempt to find the video in S3 by checking common patterns
+    const possibleKeys = [
+      `generated/anonymous/${videoId}.mp4`,
+      `generated/${videoId}.mp4`,
+      `videos/${videoId}.mp4`,
+    ];
+
+    for (const key of possibleKeys) {
+      try {
+        await s3Client.send(
+          new HeadObjectCommand({
+            Bucket: STORAGE_BUCKET,
+            Key: key,
+          })
+        );
+        
+        // Video found - return completed status
+        return {
+          videoId,
+          status: 'completed',
+          progress: 100,
+          s3Uri: `s3://${STORAGE_BUCKET}/${key}`,
+        };
+      } catch {
+        // Key not found, continue checking
+      }
+    }
+
+    // Video not found yet - return pending status
+    // Note: Nova Reel generation can take several minutes
+    return {
+      videoId,
+      status: 'pending',
+      progress: 0,
+      message: 'Video generation in progress. This may take several minutes.',
+    };
+  } catch (error) {
+    log('ERROR', 'GetVideoStatus failed', { videoId, error });
+    return {
+      videoId,
+      status: 'error',
+      progress: 0,
+      message: 'Failed to check video status',
+    };
+  }
 }
 
 // =============================================================================
