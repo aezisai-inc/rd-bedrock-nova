@@ -29,7 +29,7 @@ def get_agent() -> NovaCoordinatorAgent:
         _agent_instance = NovaCoordinatorAgent(
             session_table=os.environ.get('SESSION_TABLE'),
             event_store_table=os.environ.get('EVENT_STORE_TABLE'),
-            model_id=os.environ.get('MODEL_ID', 'anthropic.claude-3-5-sonnet-20240620-v1:0'),
+            model_id=os.environ.get('MODEL_ID', 'anthropic.claude-opus-4-5-20251101-v1:0'),  # Claude Opus 4.5
             guardrail_id=os.environ.get('GUARDRAIL_ID'),
         )
         logger.info("Agent Core initialized successfully")

@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     nova_sonic_model_id: str = "amazon.nova-sonic-v1:0"
     nova_omni_model_id: str = "amazon.nova-omni-v1:0"
     nova_embeddings_model_id: str = "amazon.nova-embed-multimodal-v1:0"
-    claude_model_id: str = "anthropic.claude-3-5-sonnet-20241022-v2:0"
+    claude_model_id: str = "anthropic.claude-opus-4-5-20251101-v1:0"  # Claude Opus 4.5
 
     # DynamoDB
     event_store_table: str = "nova-event-store"

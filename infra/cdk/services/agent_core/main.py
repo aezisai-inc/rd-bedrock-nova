@@ -230,7 +230,7 @@ async def call_claude_with_tools(
     }
 
     response = bedrock_client.invoke_model(
-        modelId='anthropic.claude-3-5-sonnet-20241022-v2:0',
+        modelId='anthropic.claude-opus-4-5-20251101-v1:0',  # Claude Opus 4.5
         body=json.dumps(request_body),
     )
 
@@ -273,7 +273,7 @@ async def call_claude_with_tool_results(
     }
 
     response = bedrock_client.invoke_model(
-        modelId='anthropic.claude-3-5-sonnet-20241022-v2:0',
+        modelId='anthropic.claude-opus-4-5-20251101-v1:0',  # Claude Opus 4.5
         body=json.dumps(request_body),
     )
 

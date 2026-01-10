@@ -43,7 +43,7 @@ class NovaCoordinatorAgent:
         self,
         session_table: str = None,
         event_store_table: str = None,
-        model_id: str = 'anthropic.claude-3-5-sonnet-20240620-v1:0',
+        model_id: str = 'anthropic.claude-opus-4-5-20251101-v1:0',  # Claude Opus 4.5
         guardrail_id: Optional[str] = None,
     ):
         """
