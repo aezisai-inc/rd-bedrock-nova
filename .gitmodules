@@ -1,0 +1,20 @@
+[submodule ".synaptic"]
+	path = .synaptic
+	url = git@github.com:aezisai-inc/aria-synaptic.git
+	branch = develop
+[submodule ".aria"]
+	path = .aria
+	url = git@github.com:aezisai-inc/aria-app-settings.git
+	branch = develop
+[submodule ".ide"]
+	path = .ide
+	url = git@github.com:aezisai-inc/aria-ide-standards.git
+	branch = develop
+[submodule ".cursor"]
+	path = .cursor
+	url = git@github.com:aezisai-inc/aria-cursor-rules.git
+	branch = develop
+[submodule ".well-known"]
+	path = .well-known
+	url = git@github.com:aezisai-inc/aria-well-known.git
+	branch = develop
